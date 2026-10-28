@@ -90,7 +90,9 @@
 
 推送到 `main` 或手动触发 `Actions → iOS CI → Run workflow`，完成后在 Artifacts 下载 `Legado-iOS-IPA`（`Legado-unsigned.ipa`），用 ESign / Feather / Sideloadly 自签安装。
 
-构建失败时 workflow 会自动创建（或追加到）一个 Issue 并把 `error:` 行贴出来，方便定位。
+构建失败时，`error:` 行会以 **annotation** 形式贴在运行页面（不需要登录也能看），同时日志末尾 80 行会打印在 Build 之后的步骤里。
+
+> macOS runner 有时会因容量不足直接报 `The job was not acquired by Runner`，这是 GitHub 侧排队失败，与代码无关，重新触发即可。
 
 ### 本地（有 Mac）
 
@@ -101,12 +103,25 @@ open Legado.xcodeproj    # ⌘R
 
 真机需要把 `PRODUCT_BUNDLE_IDENTIFIER` 改成自己的，并选个人 Team 签名。
 
+### 没有 Mac 时怎么验证规则引擎
+
+`Type Check` workflow 用 Linux 上的 Swift 编译器做两件事，1 分钟内出结果：
+
+1. `swiftc -typecheck` 检查纯 Foundation 的 `LegadoSelector` / `JSONPathEvaluator` / `HTMLTextExtractor`；
+2. 用**真实 SwiftSoup** + JavaScriptCore/Kanna/CryptoKit 的桩，编译 `RuleEngine.swift`、`RuleSplitter.swift`、`TemplateEngine.swift`、`JSBridge.swift`。
+
+本地还可以跑括号/字符串配平自检：
+
+```bash
+python tools/check_swift_balance.py Core
+```
+
 ## 6. 已知差距（需要继续做）
 
 - **书源变量持久化**：`java.put` / `@put` 只在单次解析内有效，未写回 `BookSource.variable`；依赖登录态变量的书源需要补这一层。
 - **`loginCheckJs` / `jsLib`**：字段存在，尚未在 JS 上下文里预置。
 - **`webJs` / `sourceRegex`**：正文规则里的这两个字段尚未执行。
-- **单元测试未接线**：`Tests/Unit/*.swift` 是规则引擎的回归测试（覆盖 `class.` 语法、`##`、`||`、JSONPath 通配/递归、XPath、`java.*`），但 Xcode 工程里没有测试 target，CI 目前只验证「能编译 + 能打包」。接测试 target 是下一步。
+- **单元测试未接线**：`Tests/Unit/RuleEngineTests.swift` 是规则引擎回归测试（覆盖 `class.` 语法、`##`、`||`、JSONPath 通配/递归、XPath、`java.*`），但 Xcode 工程里没有测试 target，该文件不参与编译；目前靠 `Type Check` workflow 做类型检查、靠 `tools/check_swift_balance.py` 做结构自检。把它接成真正的测试 target 是下一步。
 - **RSS 深链导入**：仍是占位实现。
 - **合规**：本项目不含任何书籍内容、不内置书源；请只导入你有权使用的内容。
 

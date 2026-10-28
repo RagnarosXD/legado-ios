@@ -42,8 +42,11 @@ jobs:
           sed -e '/^import JavaScriptCore$/d' -e '/^import Kanna$/d' \
               Core/RuleEngine/RuleEngine.swift > /tmp/engine/Sources/Engine/RuleEngine.swift
           # JSBridge 用了 URLSession，Linux 上需要 FoundationNetworking
+          # Apple 平台允许 String as CFString，Linux 不允许，这里把那处转换替换成常量以完成类型检查
           { echo "import FoundationNetworking"; echo "import CoreFoundation"; \
-            sed -e '/^import CryptoKit$/d' -e '/^import JavaScriptCore$/d' Core/RuleEngine/JSBridge.swift; } \
+            sed -e '/^import CryptoKit$/d' -e '/^import JavaScriptCore$/d' \
+                -e 's/CFStringConvertIANACharSetNameToEncoding(encodingName as CFString)/kCFStringEncodingInvalidId/' \
+                Core/RuleEngine/JSBridge.swift; } \
               > /tmp/engine/Sources/Engine/JSBridge.swift
           cd /tmp/engine
           swift build 2>&1 | tee build.log

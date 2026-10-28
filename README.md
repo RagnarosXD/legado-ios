@@ -2,6 +2,9 @@
 
 把 Android 阅读器 [LegadoTeam/legado](https://github.com/LegadoTeam/legado) 的核心能力移植到 iOS：SwiftUI + CoreData + SwiftSoup/Kanna/JavaScriptCore，无 macOS 也能用 GitHub Actions 云端编译出未签名 IPA。
 
+[![iOS CI](https://github.com/RagnarosXD/legado-ios/actions/workflows/ios-ci.yml/badge.svg)](https://github.com/RagnarosXD/legado-ios/actions/workflows/ios-ci.yml)
+[![Type Check](https://github.com/RagnarosXD/legado-ios/actions/workflows/typecheck.yml/badge.svg)](https://github.com/RagnarosXD/legado-ios/actions/workflows/typecheck.yml)
+
 > 不是 Android 代码的逐行翻译，而是按 Legado 的数据模型与书源规则语义重写；书源 JSON 可直接导入，规则语法按 Legado 3.x 实现。
 
 | 项 | 值 |

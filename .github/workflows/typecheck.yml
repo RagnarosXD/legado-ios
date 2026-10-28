@@ -42,7 +42,7 @@ jobs:
           sed -e '/^import JavaScriptCore$/d' -e '/^import Kanna$/d' \
               Core/RuleEngine/RuleEngine.swift > /tmp/engine/Sources/Engine/RuleEngine.swift
           # JSBridge 用了 URLSession，Linux 上需要 FoundationNetworking
-          { echo "import FoundationNetworking"; \
+          { echo "import FoundationNetworking"; echo "import CoreFoundation"; \
             sed -e '/^import CryptoKit$/d' -e '/^import JavaScriptCore$/d' Core/RuleEngine/JSBridge.swift; } \
               > /tmp/engine/Sources/Engine/JSBridge.swift
           cd /tmp/engine

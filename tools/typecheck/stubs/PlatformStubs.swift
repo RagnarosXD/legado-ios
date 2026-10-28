@@ -23,13 +23,11 @@ public final class JSContext {
 public protocol XMLElement {
     var text: String? { get }
     var toHTML: String? { get }
-    var attributes: [String: String] { get }
 }
 
 public struct StubElement: XMLElement {
     public var text: String?
     public var toHTML: String?
-    public var attributes: [String: String] = [:]
 }
 
 public enum Kanna {

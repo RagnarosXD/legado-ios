@@ -717,11 +717,14 @@ class XPathParser: RuleExecutor {
             case "html", "innerhtml", "outerhtml", "all":
                 value = node.toHTML
             case "href":
-                value = node.attributes["href"].map { CSSParser.absolute($0, base: context.baseURL) }
+                let raw = XPathParser.attribute("href", html: node.toHTML)
+                value = raw.isEmpty ? nil : CSSParser.absolute(raw, base: context.baseURL)
             case "src":
-                value = node.attributes["src"].map { CSSParser.absolute($0, base: context.baseURL) }
+                let raw = XPathParser.attribute("src", html: node.toHTML)
+                value = raw.isEmpty ? nil : CSSParser.absolute(raw, base: context.baseURL)
             default:
-                value = node.attributes[attr] ?? node.text
+                let raw = XPathParser.attribute(attr, html: node.toHTML)
+                value = raw.isEmpty ? node.text : raw
             }
 
             if let value, !value.isEmpty {
@@ -736,6 +739,27 @@ class XPathParser: RuleExecutor {
         }
 
         return .none
+    }
+
+    /// 从节点的 outerHTML 里取属性值
+    /// Kanna 各版本对 `attributes` 的暴露不一致，这里只依赖 `toHTML`，避免编译期 API 差异
+    static func attribute(_ name: String, html: String?) -> String {
+        guard let html, !html.isEmpty, !name.isEmpty else { return "" }
+
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        let pattern = "\\b" + escaped + "\\s*=\\s*[\"']([^\"']*)[\"']"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return ""
+        }
+
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              match.numberOfRanges > 1,
+              let valueRange = Range(match.range(at: 1), in: html) else {
+            return ""
+        }
+
+        return String(html[valueRange])
     }
 }
 

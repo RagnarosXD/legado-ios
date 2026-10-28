@@ -63,6 +63,17 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           IPHONEOS_DEPLOYMENT_TARGET=16.0 2>&1 | tee build.log
 
+    # 把编译错误作为 annotation 打出来：不登录 GitHub 也能在运行页面直接看到
+    - name: Show compile errors
+      if: failure()
+      continue-on-error: true
+      run: |
+        if [ -f build.log ]; then
+          grep -E "error:" build.log | head -n 12 | sed 's/^/::error::/' || true
+          echo "----- full error list -----" || true
+          grep -E "error:" build.log | head -n 80 || true
+        fi
+
     - name: Publish failure log
       if: failure()
       continue-on-error: true

@@ -13,9 +13,9 @@ jobs:
     name: Build & Test
     runs-on: macos-14
     timeout-minutes: 30
-    # 构建失败时把 error: 行写到 ci-log 分支，方便不在 Mac 上也能看到编译错误
+    # 构建失败的 error 行会以 annotation 形式贴在运行页面，无需登录即可看到
     permissions:
-      contents: write
+      contents: read
 
     steps:
     - name: Checkout
@@ -73,39 +73,6 @@ jobs:
           echo "----- full error list -----" || true
           grep -E "error:" build.log | head -n 80 || true
         fi
-
-    - name: Publish failure log
-      if: failure()
-      continue-on-error: true
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          let log = '';
-          try { log = fs.readFileSync('build.log', 'utf8'); } catch (error) {}
-          const errors = log.split('\n').filter((line) => /error:/.test(line)).join('\n');
-          const text = errors || log.slice(-20000) || '(没有抓到日志)';
-          const branch = 'ci-log';
-          const { owner, repo } = context.repo;
-          try {
-            await github.rest.git.createRef({
-              owner, repo, ref: `refs/heads/${branch}`, sha: context.sha
-            });
-          } catch (error) {}
-          let existingSha;
-          try {
-            const res = await github.rest.repos.getContent({
-              owner, repo, path: 'build-error.log', ref: branch
-            });
-            existingSha = res.data.sha;
-          } catch (error) {}
-          const params = {
-            owner, repo, branch, path: 'build-error.log',
-            message: 'ci: 构建失败日志',
-            content: Buffer.from(text).toString('base64')
-          };
-          if (existingSha) { params.sha = existingSha; }
-          await github.rest.repos.createOrUpdateFileContents(params);
 
     - name: Check Unit Test Target
       id: test_target

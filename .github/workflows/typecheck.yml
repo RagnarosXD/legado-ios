@@ -1,6 +1,8 @@
 name: Type Check
 
-# macOS runner 排队很久时，用 Linux 上的 Swift 编译器先给「纯 Foundation」的规则解析代码做类型检查
+# macOS runner 排队很久时，用 Linux 上的 Swift 编译器先给规则引擎做类型检查：
+#   1. 纯 Foundation 的选择器 / JSONPath / HTML 清洗代码（RuleSplitter.swift）
+#   2. 用真实 SwiftSoup 编译 RuleEngine.swift（JavaScriptCore、Kanna、CoreData 实体用桩顶替）
 on:
   push:
     branches: [ main ]
@@ -8,9 +10,9 @@ on:
 
 jobs:
   typecheck:
-    name: Typecheck rule engine core
+    name: Typecheck rule engine
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -22,12 +24,26 @@ jobs:
       - name: Swift version
         run: swift --version
 
-      - name: Typecheck LegadoSelector / JSONPathEvaluator / HTMLTextExtractor
+      - name: Typecheck standalone helpers (LegadoSelector / JSONPath / HTMLTextExtractor)
         run: |
           set -o pipefail
-          swiftc -typecheck Core/RuleEngine/RuleSplitter.swift tools/typecheck/RuleKindStub.swift 2>&1 | tee typecheck.log
+          swiftc -typecheck Core/RuleEngine/RuleSplitter.swift tools/typecheck/RuleKindStub.swift 2>&1 | tee helpers.log
+
+      - name: Build engine against real SwiftSoup
+        run: |
+          set -o pipefail
+          rm -rf /tmp/engine && mkdir -p /tmp/engine/Sources/Engine
+          cp tools/typecheck/Package.template.swift /tmp/engine/Package.swift
+          cp Core/RuleEngine/RuleEngine.swift Core/RuleEngine/RuleSplitter.swift /tmp/engine/Sources/Engine/
+          cp Core/RuleEngine/TemplateEngine.swift /tmp/engine/Sources/Engine/
+          cp tools/typecheck/stubs/PlatformStubs.swift /tmp/engine/Sources/Engine/
+          cd /tmp/engine
+          swift build 2>&1 | tee build.log
 
       - name: Show errors as annotations
         if: failure()
         continue-on-error: true
-        run: grep -E "error:" typecheck.log | head -n 20 | sed 's/^/::error::/' || true
+        run: |
+          cat helpers.log 2>/dev/null | grep -E "error:" | head -n 10 | sed 's/^/::error::/'
+          cat /tmp/engine/build.log 2>/dev/null | grep -E "error:" | head -n 10 | sed 's/^/::error::/'
+          cat /tmp/engine/build.log 2>/dev/null | grep -E "error:" | head -n 60

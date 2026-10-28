@@ -51,10 +51,4 @@ public final class BookSource {
     public var header: String?
 }
 
-// MARK: - JSBridge 桩（真实实现依赖 JavaScriptCore）
-
-final class JSBridge {
-    weak var context: ExecutionContext?
-    weak var ruleEngine: RuleEngine?
-    func inject(into jsContext: JSContext) {}
-}
+// MARK: - JSBridge 使用真实实现（JSBridge.swift 一起编译进临时包）

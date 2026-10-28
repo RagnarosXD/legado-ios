@@ -37,9 +37,14 @@ jobs:
           cp Core/RuleEngine/RuleSplitter.swift /tmp/engine/Sources/Engine/
           cp Core/RuleEngine/TemplateEngine.swift /tmp/engine/Sources/Engine/
           cp tools/typecheck/stubs/PlatformStubs.swift /tmp/engine/Sources/Engine/
-          # Linux 上没有 JavaScriptCore / Kanna，去掉这两行 import，由桩提供同名类型
+          cp tools/typecheck/stubs/CryptoShim.swift /tmp/engine/Sources/Engine/
+          # Linux 上没有 JavaScriptCore / Kanna / CryptoKit，去掉这些 import，由桩提供同名类型
           sed -e '/^import JavaScriptCore$/d' -e '/^import Kanna$/d' \
               Core/RuleEngine/RuleEngine.swift > /tmp/engine/Sources/Engine/RuleEngine.swift
+          # JSBridge 用了 URLSession，Linux 上需要 FoundationNetworking
+          { echo "import FoundationNetworking"; \
+            sed -e '/^import CryptoKit$/d' -e '/^import JavaScriptCore$/d' Core/RuleEngine/JSBridge.swift; } \
+              > /tmp/engine/Sources/Engine/JSBridge.swift
           cd /tmp/engine
           swift build 2>&1 | tee build.log
 

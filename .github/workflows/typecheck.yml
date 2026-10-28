@@ -1,0 +1,33 @@
+name: Type Check
+
+# macOS runner 排队很久时，用 Linux 上的 Swift 编译器先给「纯 Foundation」的规则解析代码做类型检查
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  typecheck:
+    name: Typecheck rule engine core
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Typecheck LegadoSelector / JSONPathEvaluator / HTMLTextExtractor
+        run: |
+          set -o pipefail
+          swiftc -typecheck Core/RuleEngine/RuleSplitter.swift tools/typecheck/RuleKindStub.swift 2>&1 | tee typecheck.log
+
+      - name: Show errors as annotations
+        if: failure()
+        continue-on-error: true
+        run: grep -E "error:" typecheck.log | head -n 20 | sed 's/^/::error::/' || true

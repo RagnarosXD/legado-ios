@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 struct SplitRule {
     let type: RuleKind

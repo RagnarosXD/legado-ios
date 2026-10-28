@@ -52,15 +52,20 @@ class JSBridge {
             return JSBridgeHTTPClient.syncPost(url: url, body: body, headers: merged) ?? ""
         }
 
-        // java.ajaxAll(urls) —— 串行同步抓取，返回数组
-        let ajaxAllBlock: @convention(block) (String) -> [String] = { urlsJSON in
+        // java.ajaxAll(urls) —— 串行同步抓取，返回 JSON 数组字符串（由 JS 包装层转成真数组）
+        let ajaxAllBlock: @convention(block) (String) -> String = { urlsJSON in
             guard let data = urlsJSON.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data),
                   let urls = object as? [String] else {
-                return []
+                return "[]"
             }
             let headers = self.parseSourceHeaders()
-            return urls.map { JSBridgeHTTPClient.syncGet(url: $0, headers: headers) ?? "" }
+            let results = urls.map { JSBridgeHTTPClient.syncGet(url: $0, headers: headers) ?? "" }
+            guard let output = try? JSONSerialization.data(withJSONObject: results),
+                  let json = String(data: output, encoding: .utf8) else {
+                return "[]"
+            }
+            return json
         }
 
         // java.getString(rule) / java.getElements(rule)：在“当前页面上下文”上求值
@@ -71,12 +76,16 @@ class JSBridge {
             return result.text
         }
 
-        let ruleElementsBlock: @convention(block) (String) -> [String] = { rule in
-            guard let context = self.context, !rule.isEmpty else { return [] }
+        let ruleElementsBlock: @convention(block) (String) -> String = { rule in
+            guard let context = self.context, !rule.isEmpty else { return "[]" }
             let engine = RuleEngine()
-            guard let result = try? engine.executeSingle(rule: rule, context: context) else { return [] }
-            if let list = result.list { return list }
-            return result.text.isEmpty ? [] : [result.text]
+            guard let result = try? engine.executeSingle(rule: rule, context: context) else { return "[]" }
+            let values = result.list ?? (result.text.isEmpty ? [] : [result.text])
+            guard let output = try? JSONSerialization.data(withJSONObject: values),
+                  let json = String(data: output, encoding: .utf8) else {
+                return "[]"
+            }
+            return json
         }
 
         let base64EncodeBlock: @convention(block) (String) -> String = { text in
@@ -163,13 +172,19 @@ class JSBridge {
                 if (typeof java === 'undefined' || !java) { return; }
                 function s(value) { return value === null || value === undefined ? '' : String(value); }
                 java.getString = function (rule) { return java.__getString(s(rule)); };
-                java.getElements = function (rule) { return java.__getElements(s(rule)); };
+                java.getElements = function (rule) {
+                    var raw = java.__getElements(s(rule));
+                    try { return JSON.parse(raw); } catch (e) { return []; }
+                };
                 java.post = function (url, body, headers) {
                     var payload = '';
                     if (headers) { payload = typeof headers === 'string' ? headers : JSON.stringify(headers); }
                     return java.__post(s(url), s(body), payload);
                 };
-                java.ajaxAll = function (urls) { return java.__ajaxAll(JSON.stringify(urls || [])); };
+                java.ajaxAll = function (urls) {
+                    var raw = java.__ajaxAll(JSON.stringify(urls || []));
+                    try { return JSON.parse(raw); } catch (e) { return []; }
+                };
                 java.encodeURI = function (text, enc) { return java.__encodeURI(s(text), s(enc)); };
                 java.timeFormat = function (time) { return java.__timeFormat(Number(time) || 0); };
             })();

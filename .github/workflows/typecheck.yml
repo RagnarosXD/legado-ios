@@ -34,9 +34,12 @@ jobs:
           set -o pipefail
           rm -rf /tmp/engine && mkdir -p /tmp/engine/Sources/Engine
           cp tools/typecheck/Package.template.swift /tmp/engine/Package.swift
-          cp Core/RuleEngine/RuleEngine.swift Core/RuleEngine/RuleSplitter.swift /tmp/engine/Sources/Engine/
+          cp Core/RuleEngine/RuleSplitter.swift /tmp/engine/Sources/Engine/
           cp Core/RuleEngine/TemplateEngine.swift /tmp/engine/Sources/Engine/
           cp tools/typecheck/stubs/PlatformStubs.swift /tmp/engine/Sources/Engine/
+          # Linux 上没有 JavaScriptCore / Kanna，去掉这两行 import，由桩提供同名类型
+          sed -e '/^import JavaScriptCore$/d' -e '/^import Kanna$/d' \
+              Core/RuleEngine/RuleEngine.swift > /tmp/engine/Sources/Engine/RuleEngine.swift
           cd /tmp/engine
           swift build 2>&1 | tee build.log
 

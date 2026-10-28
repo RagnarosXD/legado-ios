@@ -717,11 +717,11 @@ class XPathParser: RuleExecutor {
             case "html", "innerhtml", "outerhtml", "all":
                 value = node.toHTML
             case "href":
-                value = node["href"].map { CSSParser.absolute($0, base: context.baseURL) }
+                value = node.attributes["href"].map { CSSParser.absolute($0, base: context.baseURL) }
             case "src":
-                value = node["src"].map { CSSParser.absolute($0, base: context.baseURL) }
+                value = node.attributes["src"].map { CSSParser.absolute($0, base: context.baseURL) }
             default:
-                value = node[attr]
+                value = node.attributes[attr] ?? node.text
             }
 
             if let value, !value.isEmpty {

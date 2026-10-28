@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import CryptoKit
 
 class JSBridge {
     weak var context: ExecutionContext?
@@ -19,10 +20,6 @@ class JSBridge {
 
             let headers = self.parseSourceHeaders()
             return JSBridgeHTTPClient.syncGet(url: url, headers: headers) ?? ""
-        }
-
-        let getStringBlock: @convention(block) (String) -> String = { url in
-            return ajaxBlock(url)
         }
 
         let getStringAsyncBlock: @convention(block) (String) -> Void = { url in
@@ -48,14 +45,147 @@ class JSBridge {
             print("[JSBridge] \(message)")
         }
 
+        // java.post(url, body, headersJson)
+        let postBlock: @convention(block) (String, String, String) -> String = { url, body, headers in
+            guard !url.isEmpty else { return "" }
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            return JSBridgeHTTPClient.syncPost(url: url, body: body, headers: merged) ?? ""
+        }
+
+        // java.ajaxAll(urls) —— 串行同步抓取，返回数组
+        let ajaxAllBlock: @convention(block) (String) -> [String] = { urlsJSON in
+            guard let data = urlsJSON.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data),
+                  let urls = object as? [String] else {
+                return []
+            }
+            let headers = self.parseSourceHeaders()
+            return urls.map { JSBridgeHTTPClient.syncGet(url: $0, headers: headers) ?? "" }
+        }
+
+        // java.getString(rule) / java.getElements(rule)：在“当前页面上下文”上求值
+        let ruleStringBlock: @convention(block) (String) -> String = { rule in
+            guard let context = self.context, !rule.isEmpty else { return "" }
+            let engine = RuleEngine()
+            guard let result = try? engine.executeSingle(rule: rule, context: context) else { return "" }
+            return result.text
+        }
+
+        let ruleElementsBlock: @convention(block) (String) -> [String] = { rule in
+            guard let context = self.context, !rule.isEmpty else { return [] }
+            let engine = RuleEngine()
+            guard let result = try? engine.executeSingle(rule: rule, context: context) else { return [] }
+            if let list = result.list { return list }
+            return result.text.isEmpty ? [] : [result.text]
+        }
+
+        let base64EncodeBlock: @convention(block) (String) -> String = { text in
+            return Data(text.utf8).base64EncodedString()
+        }
+
+        let base64DecodeBlock: @convention(block) (String) -> String = { text in
+            guard let data = Data(base64Encoded: text, options: .ignoreUnknownCharacters) else { return "" }
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+
+        let md5Block: @convention(block) (String) -> String = { text in
+            let digest = Insecure.MD5.hash(data: Data(text.utf8))
+            return digest.map { String(format: "%02x", $0) }.joined()
+        }
+
+        let md5ShortBlock: @convention(block) (String) -> String = { text in
+            let digest = Insecure.MD5.hash(data: Data(text.utf8))
+            return String(digest.map { String(format: "%02x", $0) }.joined().prefix(16))
+        }
+
+        // java.encodeURI(str, enc) / java.encodeURI(str)
+        let encodeURIBlock: @convention(block) (String, String) -> String = { text, charset in
+            let allowed = CharacterSet(charactersIn:
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+            if charset.lowercased().contains("gb") {
+                let cf = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
+                if let data = text.data(using: String.Encoding(rawValue: cf)) {
+                    return data.map { String(format: "%%%02X", $0) }.joined()
+                }
+            }
+            return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? text
+        }
+
+        let decodeURIBlock: @convention(block) (String) -> String = { text in
+            return text.removingPercentEncoding ?? text
+        }
+
+        // java.timeFormat(millis)
+        let timeFormatBlock: @convention(block) (Double) -> String = { millis in
+            let date = Date(timeIntervalSince1970: millis > 100_000_000_000 ? millis / 1000 : millis)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy/MM/dd HH:mm"
+            return formatter.string(from: date)
+        }
+
+        // java.htmlFormat(str)：去掉标签
+        let htmlFormatBlock: @convention(block) (String) -> String = { html in
+            return HTMLTextExtractor.plainText(from: html)
+        }
+
+        let toastBlock: @convention(block) (String) -> Void = { message in
+            print("[JSBridge][toast] \(message)")
+        }
+
         javaObject?.setObject(ajaxBlock, forKeyedSubscript: "ajax" as NSString)
-        javaObject?.setObject(getStringBlock, forKeyedSubscript: "getString" as NSString)
         javaObject?.setObject(getStringAsyncBlock, forKeyedSubscript: "getStringAsync" as NSString)
         javaObject?.setObject(putBlock, forKeyedSubscript: "put" as NSString)
         javaObject?.setObject(getBlock, forKeyedSubscript: "get" as NSString)
         javaObject?.setObject(logBlock, forKeyedSubscript: "log" as NSString)
+        javaObject?.setObject(base64EncodeBlock, forKeyedSubscript: "base64Encode" as NSString)
+        javaObject?.setObject(base64DecodeBlock, forKeyedSubscript: "base64Decode" as NSString)
+        javaObject?.setObject(md5Block, forKeyedSubscript: "md5Encode" as NSString)
+        javaObject?.setObject(md5ShortBlock, forKeyedSubscript: "md5Encode16" as NSString)
+        javaObject?.setObject(decodeURIBlock, forKeyedSubscript: "decodeURI" as NSString)
+        javaObject?.setObject(htmlFormatBlock, forKeyedSubscript: "htmlFormat" as NSString)
+        javaObject?.setObject(toastBlock, forKeyedSubscript: "toast" as NSString)
+        javaObject?.setObject(toastBlock, forKeyedSubscript: "longToast" as NSString)
+
+        // 参数类型需要兜底的 API 用私有名注册，再由 JS 包装层统一转成字符串/数字，
+        // 避免书源脚本传 undefined 时桥接层崩溃。
+        javaObject?.setObject(ruleStringBlock, forKeyedSubscript: "__getString" as NSString)
+        javaObject?.setObject(ruleElementsBlock, forKeyedSubscript: "__getElements" as NSString)
+        javaObject?.setObject(postBlock, forKeyedSubscript: "__post" as NSString)
+        javaObject?.setObject(ajaxAllBlock, forKeyedSubscript: "__ajaxAll" as NSString)
+        javaObject?.setObject(encodeURIBlock, forKeyedSubscript: "__encodeURI" as NSString)
+        javaObject?.setObject(timeFormatBlock, forKeyedSubscript: "__timeFormat" as NSString)
 
         jsContext.setValue(javaObject, forKey: "java")
+
+        _ = jsContext.evaluateScript(
+            """
+            (function () {
+                if (typeof java === 'undefined' || !java) { return; }
+                function s(value) { return value === null || value === undefined ? '' : String(value); }
+                java.getString = function (rule) { return java.__getString(s(rule)); };
+                java.getElements = function (rule) { return java.__getElements(s(rule)); };
+                java.post = function (url, body, headers) {
+                    var payload = '';
+                    if (headers) { payload = typeof headers === 'string' ? headers : JSON.stringify(headers); }
+                    return java.__post(s(url), s(body), payload);
+                };
+                java.ajaxAll = function (urls) { return java.__ajaxAll(JSON.stringify(urls || [])); };
+                java.encodeURI = function (text, enc) { return java.__encodeURI(s(text), s(enc)); };
+                java.timeFormat = function (time) { return java.__timeFormat(Number(time) || 0); };
+            })();
+            """
+        )
+    }
+
+    /// 解析 header 参数（JSON 字符串 → 字典）
+    private func parseHeaders(_ json: String) -> [String: String]? {
+        guard !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var headers: [String: String] = [:]
+        for (key, value) in object {
+            headers[key] = "\(value)"
+        }
+        return headers.isEmpty ? nil : headers
     }
 
     private func injectSourceObject(into jsContext: JSContext) {
@@ -205,7 +335,25 @@ class JSBridgeHTTPClient {
         guard let request = makeRequest(url: url, headers: headers) else {
             return nil
         }
+        return perform(request)
+    }
 
+    /// 同步 POST（java.post 使用）
+    static func syncPost(url: String, body: String, headers: [String: String]?) -> String? {
+        guard var request = makeRequest(url: url, headers: headers) else {
+            return nil
+        }
+
+        request.httpMethod = "POST"
+        request.httpBody = body.data(using: .utf8)
+        if request.value(forHTTPHeaderField: "Content-Type") == nil {
+            request.setValue("application/x-www-form-urlencoded; charset=UTF-8",
+                             forHTTPHeaderField: "Content-Type")
+        }
+        return perform(request)
+    }
+
+    private static func perform(_ request: URLRequest) -> String? {
         let semaphore = DispatchSemaphore(value: 0)
         var output: String?
         var task: URLSessionDataTask?
@@ -236,7 +384,7 @@ class JSBridgeHTTPClient {
         let timeout = DispatchTime.now() + .seconds(10)
         if semaphore.wait(timeout: timeout) == .timedOut {
             task?.cancel()
-            print("[JSBridgeHTTPClient] syncGet timeout: \(url)")
+            print("[JSBridgeHTTPClient] syncGet timeout: \(request.url?.absoluteString ?? "")")
             return nil
         }
 

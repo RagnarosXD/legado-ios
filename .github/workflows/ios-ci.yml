@@ -13,7 +13,11 @@ jobs:
     name: Build & Test
     runs-on: macos-14
     timeout-minutes: 30
-    
+    # 构建失败时把 error: 行汇总成 Issue，方便无 Mac 环境定位编译错误
+    permissions:
+      contents: read
+      issues: write
+
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -45,19 +49,44 @@ jobs:
         -scheme Legado
     
     - name: Build
-      run: >
-        xcodebuild build
-        -project Legado.xcodeproj
-        -scheme Legado
-        -sdk iphoneos
-        -configuration Release
-        -destination 'generic/platform=iOS'
-        -derivedDataPath "$DERIVED_DATA"
-        -resultBundlePath "$RESULT_BUNDLE"
-        CODE_SIGNING_ALLOWED=NO
-        CODE_SIGN_IDENTITY=""
-        CODE_SIGNING_REQUIRED=NO
-        IPHONEOS_DEPLOYMENT_TARGET=16.0
+      run: |
+        set -o pipefail
+        xcodebuild build \
+          -project Legado.xcodeproj \
+          -scheme Legado \
+          -sdk iphoneos \
+          -configuration Release \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath "$DERIVED_DATA" \
+          -resultBundlePath "$RESULT_BUNDLE" \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          IPHONEOS_DEPLOYMENT_TARGET=16.0 2>&1 | tee build.log
+
+    - name: Publish failure log
+      if: failure()
+      continue-on-error: true
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          let log = '';
+          try { log = fs.readFileSync('build.log', 'utf8'); } catch (error) {}
+          const errors = log.split('\n').filter((line) => /error:/.test(line)).slice(0, 40).join('\n');
+          const body = [
+            '构建失败，下面是从 xcodebuild 日志里抓到的 error 行：',
+            '',
+            '```',
+            errors || log.slice(-4000) || '(没有抓到日志)',
+            '```'
+          ].join('\n');
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'CI: 构建失败日志',
+            body
+          });
 
     - name: Check Unit Test Target
       id: test_target

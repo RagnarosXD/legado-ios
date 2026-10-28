@@ -120,36 +120,73 @@ struct URLSchemeHandler {
     }
     
     static func importBookSourceJSON(_ jsonString: String, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let data = jsonString.data(using: .utf8) else {
+        guard let data = jsonString.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
             completion(.failure(URLError(.cannotDecodeContentData)))
             return
         }
-        
-        do {
-            let decoder = JSONDecoder()
-            if jsonString.hasPrefix("[") {
-                let sources = try decoder.decode([SourceJSON].self, from: data)
-                let context = CoreDataStack.shared.viewContext
-                var imported = 0
-                for json in sources {
-                    let source = BookSource.create(in: context)
-                    source.bookSourceUrl = json.bookSourceUrl
-                    source.bookSourceName = json.bookSourceName
-                    source.bookSourceGroup = json.bookSourceGroup ?? ""
-                    imported += 1
-                }
-                try context.save()
-                completion(.success("成功导入 \(imported) 个书源"))
-            } else {
-                let json = try decoder.decode(SourceJSON.self, from: data)
-                let context = CoreDataStack.shared.viewContext
-                let source = BookSource.create(in: context)
-                source.bookSourceUrl = json.bookSourceUrl
-                source.bookSourceName = json.bookSourceName
-                source.bookSourceGroup = json.bookSourceGroup ?? ""
-                try context.save()
-                completion(.success("成功导入 1 个书源"))
+
+        let rawList: [[String: Any]]
+        if let array = object as? [[String: Any]] {
+            rawList = array
+        } else if let single = object as? [String: Any] {
+            rawList = [single]
+        } else {
+            completion(.failure(URLError(.cannotParseResponse)))
+            return
+        }
+
+        let context = CoreDataStack.shared.viewContext
+        var imported = 0
+
+        for raw in rawList {
+            guard let url = raw["bookSourceUrl"] as? String, !url.isEmpty else { continue }
+
+            let source = BookSource.create(in: context)
+            source.bookSourceUrl = url
+            source.bookSourceName = raw["bookSourceName"] as? String ?? url
+            source.bookSourceGroup = raw["bookSourceGroup"] as? String
+            source.bookSourceComment = raw["bookSourceComment"] as? String
+            source.bookSourceType = Int32(raw["bookSourceType"] as? Int ?? 0)
+            source.searchUrl = raw["searchUrl"] as? String
+            source.exploreUrl = raw["exploreUrl"] as? String
+            source.header = raw["header"] as? String
+            source.loginUrl = raw["loginUrl"] as? String
+            source.loginCheckJs = raw["loginCheckJs"] as? String
+            source.jsLib = raw["jsLib"] as? String
+            source.bookUrlPattern = raw["bookUrlPattern"] as? String
+            source.enabled = raw["enabled"] as? Bool ?? true
+            source.enabledExplore = raw["enabledExplore"] as? Bool ?? true
+            source.respondTime = Int64(raw["respondTime"] as? Int ?? 180000)
+
+            // 规则必须原样保存，否则导入的书源「有名字没规则」，搜索必然为空
+            if let rule = raw["ruleSearch"] as? [String: Any],
+               let json = try? JSONSerialization.data(withJSONObject: rule) {
+                source.ruleSearchData = json
             }
+            if let rule = raw["ruleExplore"] as? [String: Any],
+               let json = try? JSONSerialization.data(withJSONObject: rule) {
+                source.ruleExploreData = json
+            }
+            if let rule = raw["ruleBookInfo"] as? [String: Any],
+               let json = try? JSONSerialization.data(withJSONObject: rule) {
+                source.ruleBookInfoData = json
+            }
+            if let rule = raw["ruleToc"] as? [String: Any],
+               let json = try? JSONSerialization.data(withJSONObject: rule) {
+                source.ruleTocData = json
+            }
+            if let rule = raw["ruleContent"] as? [String: Any],
+               let json = try? JSONSerialization.data(withJSONObject: rule) {
+                source.ruleContentData = json
+            }
+
+            imported += 1
+        }
+
+        do {
+            try context.save()
+            completion(.success("成功导入 \(imported) 个书源"))
         } catch {
             completion(.failure(error))
         }

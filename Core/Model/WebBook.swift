@@ -122,9 +122,15 @@ class WebBook {
         let elementCtx = ElementContext(
             element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8)!) as Any) :
                      (try SwiftSoup.parse(body) as Any),
-            baseUrl: redirectUrl
+            baseUrl: redirectUrl,
+            source: source
         )
-        
+
+        // 2.5 init 规则：一般只做 @put，把后续字段要用的变量先算出来
+        if let initRule = infoRule.initRule, !initRule.isEmpty {
+            _ = ruleEngine.getString(ruleStr: initRule, elementContext: elementCtx, baseUrl: redirectUrl)
+        }
+
         // 3. 填充书籍信息
         if let name = infoRule.name {
             let parsed = ruleEngine.getString(ruleStr: name, elementContext: elementCtx, baseUrl: redirectUrl)
@@ -187,6 +193,7 @@ class WebBook {
         )
         
         for (index, elementCtx) in elements.enumerated() {
+            elementCtx.source = source
             var chapter = WebChapter()
             chapter.index = index
             
@@ -246,6 +253,7 @@ class WebBook {
                 )
                 
                 for elementCtx in nextElements {
+                    elementCtx.source = source
                     var chapter = WebChapter()
                     chapter.index = chapters.count
                     chapter.title = ruleEngine.getString(ruleStr: tocRule.chapterName, elementContext: elementCtx, baseUrl: nextRedirectUrl)
@@ -277,8 +285,7 @@ class WebBook {
         }
         
         guard let ruleStr = contentRule.content, !ruleStr.isEmpty else {
-            // 如果没有正文规则，直接返回章节 URL（可能就是内容本身）
-            return chapter.chapterUrl
+            throw WebBookError.noRule("正文规则")
         }
         
         // 1. 请求正文页
@@ -307,10 +314,15 @@ class WebBook {
         let elementCtx = ElementContext(
             element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8)!) as Any) :
                      (try SwiftSoup.parse(body) as Any),
-            baseUrl: redirectUrl
+            baseUrl: redirectUrl,
+            source: source
         )
-        
-        var content = ruleEngine.getString(ruleStr: ruleStr, elementContext: elementCtx, baseUrl: redirectUrl)
+
+        // joinAll：正文规则常常命中多个段落节点，需要全部拼接
+        var content = ruleEngine.getString(ruleStr: ruleStr,
+                                           elementContext: elementCtx,
+                                           baseUrl: redirectUrl,
+                                           joinAll: true)
         
         // 3. 处理正文分页（nextContentUrl）
         if let nextContentUrlRule = contentRule.nextContentUrl, !nextContentUrlRule.isEmpty {
@@ -337,9 +349,13 @@ class WebBook {
                 
                 let nextElementCtxInner = ElementContext(
                     element: try SwiftSoup.parse(nextBody),
-                    baseUrl: nextRedirectUrl
+                    baseUrl: nextRedirectUrl,
+                    source: source
                 )
-                let nextContent = ruleEngine.getString(ruleStr: ruleStr, elementContext: nextElementCtxInner, baseUrl: nextRedirectUrl)
+                let nextContent = ruleEngine.getString(ruleStr: ruleStr,
+                                                       elementContext: nextElementCtxInner,
+                                                       baseUrl: nextRedirectUrl,
+                                                       joinAll: true)
                 
                 if !nextContent.isEmpty {
                     content += "\n" + nextContent
@@ -380,6 +396,7 @@ class WebBook {
         var books: [SearchBookResult] = []
         
         for elementCtx in elements {
+            elementCtx.source = source
             var book = SearchBookResult()
             book.sourceUrl = source.bookSourceUrl
             book.sourceName = source.bookSourceName

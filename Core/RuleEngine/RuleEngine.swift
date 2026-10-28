@@ -14,10 +14,15 @@ import Kanna
 class ElementContext {
     var element: Any      // SwiftSoup.Element, JSON dict, 或 String
     var baseUrl: String?
-    
-    init(element: Any, baseUrl: String? = nil) {
+    /// 所属书源（JS 里的 source.* 需要）
+    var source: BookSource?
+    /// 书源变量：同一本书的多条规则之间共享（@put / @get / java.put）
+    var variables: [String: String] = [:]
+
+    init(element: Any, baseUrl: String? = nil, source: BookSource? = nil) {
         self.element = element
         self.baseUrl = baseUrl
+        self.source = source
     }
 }
 
@@ -36,6 +41,18 @@ enum RuleResult {
         if case .list(let value) = self { return value }
         return nil
     }
+
+    /// 统一取值：单值直接返回，多值按行拼接
+    var text: String {
+        switch self {
+        case .string(let value):
+            return value
+        case .list(let values):
+            return values.filter { !$0.isEmpty }.joined(separator: "\n")
+        case .none:
+            return ""
+        }
+    }
 }
 
 // MARK: - 执行上下文
@@ -43,10 +60,16 @@ class ExecutionContext {
     var document: Any?
     var jsonString: String?
     var jsonDict: [String: Any]?
+    /// JSON 根节点（可能是数组，jsonDict 只能表示对象）
+    var jsonRoot: Any?
     var baseURL: URL?
     var source: BookSource?
     var variables: [String: String] = [:]
     var lastResult: RuleResult = .none
+    /// 原始 HTML：XPath 解析器需要字符串形态的文档
+    var htmlString: String?
+    /// 限定作用域的元素：字段规则要「在当前列表项内」查找，而不是整篇文档
+    var scopedElement: SwiftSoup.Element?
     
     lazy var jsContext: JSContext = {
         let context = JSContext()!
@@ -290,49 +313,73 @@ class RuleEngine {
     ///   - baseUrl: 基础 URL
     /// - Returns: 元素上下文数组
     func getElements(ruleStr: String?, body: String, baseUrl: String?) throws -> [ElementContext] {
-        guard let ruleStr = ruleStr, !ruleStr.isEmpty else { return [] }
-        
-        let isJson = body.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") ||
-                     body.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[")
-        
-        if isJson {
-            return try getJsonElements(ruleStr: ruleStr, body: body)
-        } else {
-            return try getHtmlElements(ruleStr: ruleStr, body: body, baseUrl: baseUrl)
+        guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return []
         }
+
+        let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isJson = trimmedBody.hasPrefix("{") || trimmedBody.hasPrefix("[")
+        let rule = ruleStr.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // @json: 前缀可以强制走 JSON 解析（即使响应体是 HTML 片段包裹的 JSON）
+        if rule.lowercased().hasPrefix("@json:") {
+            return try getJsonElements(ruleStr: rule, body: body)
+        }
+
+        if isJson {
+            return try getJsonElements(ruleStr: rule, body: body)
+        }
+        return try getHtmlElements(ruleStr: rule, body: body, baseUrl: baseUrl)
     }
     
     /// 从 HTML 提取元素列表
     private func getHtmlElements(ruleStr: String, body: String, baseUrl: String?) throws -> [ElementContext] {
         let doc = try SwiftSoup.parse(body)
         if let base = baseUrl { try? doc.setBaseUri(base) }
-        
-        // 处理反向列表（以 - 开头）
-        var rule = ruleStr
+
+        // 处理反向列表（以 - 开头）与正向前缀
+        var rule = ruleStr.trimmingCharacters(in: .whitespacesAndNewlines)
         var reverse = false
         if rule.hasPrefix("-") {
             reverse = true
-            rule = String(rule.dropFirst())
+            rule = String(rule.dropFirst()).trimmingCharacters(in: .whitespaces)
+        } else if rule.hasPrefix("+") {
+            rule = String(rule.dropFirst()).trimmingCharacters(in: .whitespaces)
         }
-        if rule.hasPrefix("+") {
-            rule = String(rule.dropFirst())
-        }
-        
-        // 支持 XPath 和 CSS
+
         var elements: [ElementContext]
-        if rule.hasPrefix("//") {
-            // XPath
+
+        if rule.lowercased().hasPrefix("@xpath:") || rule.hasPrefix("//") {
+            let xpath = rule.lowercased().hasPrefix("@xpath:")
+                ? String(rule.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                : rule
             let kannaDoc = try Kanna.HTML(html: body, encoding: .utf8)
-            elements = kannaDoc.xpath(rule).compactMap { node -> ElementContext? in
+            elements = kannaDoc.xpath(xpath).compactMap { node -> ElementContext? in
                 guard let html = node.toHTML else { return nil }
                 return ElementContext(element: html, baseUrl: baseUrl)
             }
         } else {
-            // CSS
-            let selected = try doc.select(rule)
-            elements = selected.array().map { ElementContext(element: $0, baseUrl: baseUrl) }
+            // class./id./tag./text./children 语法 + @tag. 级联 + !index
+            let parsed = LegadoSelector.parse(rule)
+            var selected: [SwiftSoup.Element]
+            if parsed.selector.isEmpty {
+                selected = [doc]
+            } else {
+                selected = try doc.select(parsed.selector).array()
+            }
+
+            for step in parsed.cascades {
+                selected = try selected.flatMap { try $0.select(step).array() }
+            }
+
+            if let index = parsed.index {
+                let real = index < 0 ? selected.count + index : index
+                selected = (real >= 0 && real < selected.count) ? [selected[real]] : []
+            }
+
+            elements = selected.map { ElementContext(element: $0, baseUrl: baseUrl) }
         }
-        
+
         if reverse { elements.reverse() }
         return elements
     }
@@ -340,74 +387,93 @@ class RuleEngine {
     /// 从 JSON 提取元素列表
     private func getJsonElements(ruleStr: String, body: String) throws -> [ElementContext] {
         guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) else {
+              let root = try? JSONSerialization.jsonObject(with: data) else {
             throw RuleError.noDocument
         }
-        
-        let path = ruleStr.replacingOccurrences(of: "$.", with: "")
-        let keys = path.split(separator: ".").map { String($0) }
-        
-        var current: Any? = json
-        for key in keys {
-            if let dict = current as? [String: Any] {
-                current = dict[key]
-            } else if let array = current as? [Any], let index = Int(key) {
-                current = index < array.count ? array[index] : nil
-            } else {
-                break
+
+        let matched = JSONPathEvaluator.evaluate(ruleStr, root: root)
+        var elements: [ElementContext] = []
+
+        for value in matched {
+            if let dict = value as? [String: Any] {
+                elements.append(ElementContext(element: dict))
+            } else if let array = value as? [Any] {
+                for item in array {
+                    if let dict = item as? [String: Any] {
+                        elements.append(ElementContext(element: dict))
+                    } else {
+                        elements.append(ElementContext(element: ["text": JSONPathEvaluator.stringValue(item)]))
+                    }
+                }
+            } else if let string = value as? String, !string.isEmpty {
+                elements.append(ElementContext(element: ["text": string]))
             }
         }
-        
-        if let array = current as? [[String: Any]] {
-            return array.map { ElementContext(element: $0) }
-        } else if let array = current as? [Any] {
-            return array.map { ElementContext(element: $0) }
-        }
-        
-        return []
+
+        return elements
     }
     
     // MARK: - 在元素上下文中提取字符串
     
     /// 从单个元素中提取字符串（用于从列表项中提取书名、作者等）
-    func getString(ruleStr: String?, elementContext: ElementContext, baseUrl: String? = nil) -> String {
-        guard let ruleStr = ruleStr, !ruleStr.isEmpty else { return "" }
-        
-        // 支持 && 连接（串联多个规则结果）
-        if ruleStr.contains("&&") {
-            let parts = ruleStr.components(separatedBy: "&&")
-            return parts.compactMap { getString(ruleStr: $0.trimmingCharacters(in: .whitespaces), elementContext: elementContext, baseUrl: baseUrl) }
-                       .filter { !$0.isEmpty }
-                       .joined(separator: "\n")
-        }
-        
-        // 支持 || 连接（取第一个非空结果）
-        if ruleStr.contains("||") {
-            let parts = ruleStr.components(separatedBy: "||")
-            for part in parts {
-                let result = getString(ruleStr: part.trimmingCharacters(in: .whitespaces), elementContext: elementContext, baseUrl: baseUrl)
-                if !result.isEmpty { return result }
-            }
+    ///
+    /// 所有字段规则统一走 `executeSingle`，因此 `##正则##替换`、`@css:`、`@xpath:`、
+    /// `@json:`、`@js:`、`<js>`、`&&`、`||`、`%%`、`@put/@get`、`class.xxx` 语法全部生效。
+    ///
+    /// - Parameter joinAll: true 时把多条命中结果按行拼接（正文规则），false 时取第一条非空（书名/作者等字段）
+    func getString(ruleStr: String?,
+                   elementContext: ElementContext,
+                   baseUrl: String? = nil,
+                   joinAll: Bool = false) -> String {
+        guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
         }
-        
+
+        let context = ExecutionContext()
+        context.baseURL = (baseUrl ?? elementContext.baseUrl).flatMap { URL(string: $0) }
+        context.source = elementContext.source
+        context.variables = elementContext.variables
+
+        switch elementContext.element {
+        case let dictionary as [String: Any]:
+            context.jsonDict = dictionary
+            context.jsonRoot = dictionary
+        case let array as [Any]:
+            context.jsonRoot = array
+        case let element as SwiftSoup.Element:
+            context.scopedElement = element
+            context.htmlString = (try? element.outerHtml()) ?? ""
+            if element is SwiftSoup.Document {
+                context.document = element
+            }
+        case let html as String:
+            let document = try? SwiftSoup.parse(html)
+            context.document = document
+            context.scopedElement = document
+            context.htmlString = html
+        default:
+            return ""
+        }
+
+        // @put / java.put 写入的变量回传给调用方，书源变量才能跨规则生效
+        defer { elementContext.variables = context.variables }
+
         do {
-            if let element = elementContext.element as? SwiftSoup.Element {
-                return try getStringFromElement(ruleStr: ruleStr, element: element, baseUrl: baseUrl)
-            } else if let dict = elementContext.element as? [String: Any] {
-                return getStringFromJson(ruleStr: ruleStr, json: dict)
-            } else if let html = elementContext.element as? String {
-                let context = ExecutionContext()
-                context.document = try SwiftSoup.parse(html)
-                context.baseURL = baseUrl.flatMap { URL(string: $0) }
-                let result = try executeSingle(rule: ruleStr, context: context)
-                return result.string ?? ""
+            let result = try executeSingle(rule: ruleStr, context: context)
+            if joinAll { return result.text }
+
+            switch result {
+            case .string(let value):
+                return value
+            case .list(let values):
+                return values.first(where: { !$0.isEmpty }) ?? ""
+            case .none:
+                return ""
             }
         } catch {
             print("getString 错误 [\(ruleStr)]: \(error)")
+            return ""
         }
-        
-        return ""
     }
     
     /// 从 SwiftSoup Element 中提取字符串
@@ -522,41 +588,92 @@ class CSSParser: RuleExecutor {
     }
     
     func execute(_ rule: String, context: ExecutionContext) throws -> RuleResult {
-        guard let document = context.document as? SwiftSoup.Document else {
+        // 有作用域元素时在当前列表项内查找，否则在整篇文档内查找
+        var root = context.scopedElement ?? (context.document as? SwiftSoup.Element)
+
+        // 只给了 HTML 字符串时补一个文档
+        if root == nil, let html = context.htmlString, !html.isEmpty {
+            root = try? SwiftSoup.parse(html)
+        }
+
+        guard let root else {
             throw RuleError.noDocument
         }
-        
-        let (selector, attr) = parseSelector(rule)
-        let elements = try document.select(selector)
-        
-        if let first = elements.first() {
-            switch attr {
-            case "text":
-                return .string(try first.text())
-            case "html":
-                return .string(try first.html())
-            case "href":
-                return .string(try first.attr("href"))
-            case "src":
-                return .string(try first.attr("src"))
-            default:
-                return .string(try first.text())
-            }
+
+        let parsed = LegadoSelector.parse(rule)
+
+        var elements: [SwiftSoup.Element]
+        if parsed.selector.isEmpty {
+            elements = [root]
+        } else {
+            elements = try root.select(parsed.selector).array()
         }
-        
-        return .none
+
+        for step in parsed.cascades {
+            elements = try elements.flatMap { try $0.select(step).array() }
+        }
+
+        if let index = parsed.index {
+            let real = index < 0 ? elements.count + index : index
+            elements = (real >= 0 && real < elements.count) ? [elements[real]] : []
+        }
+
+        guard !elements.isEmpty else { return .none }
+
+        var values: [String] = []
+        for element in elements {
+            let value = try CSSParser.string(from: element, attr: parsed.attr, base: context.baseURL)
+            if !value.isEmpty { values.append(value) }
+        }
+
+        guard !values.isEmpty else { return .none }
+        return values.count == 1 ? .string(values[0]) : .list(values)
     }
-    
-    private func parseSelector(_ rule: String) -> (String, String) {
-        var selector = rule
-        var attr = "text"
-        
-        if let range = rule.range(of: "@") {
-            selector = String(rule[..<range.lowerBound])
-            attr = String(rule[range.upperBound...])
+
+    /// 从元素中按属性名取值
+    static func string(from element: SwiftSoup.Element, attr: String, base: URL?) throws -> String {
+        switch attr.lowercased() {
+        case "text":
+            let html = (try? element.html()) ?? ""
+            if html.contains("<") {
+                let text = HTMLTextExtractor.plainText(from: html)
+                if !text.isEmpty { return text }
+            }
+            return try element.text()
+
+        case "textnodes":
+            return element.textNodes().map { $0.text() }.joined(separator: "\n")
+
+        case "html", "innerhtml":
+            return try element.html()
+
+        case "outerhtml", "all":
+            return try element.outerHtml()
+
+        case "href", "abs:href":
+            return CSSParser.absolute(try element.attr("href"), base: base)
+
+        case "src", "abs:src":
+            return CSSParser.absolute(try element.attr("src"), base: base)
+
+        default:
+            let raw = try element.attr(attr)
+            if raw.isEmpty {
+                return try element.text()
+            }
+            return raw
         }
-        
-        return (selector, attr)
+    }
+
+    /// 相对 URL 补全
+    static func absolute(_ value: String, base: URL?) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "" }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("data:") {
+            return trimmed
+        }
+        guard let base else { return trimmed }
+        return URL(string: trimmed, relativeTo: base)?.absoluteString ?? trimmed
     }
 }
 
@@ -569,25 +686,55 @@ class XPathParser: RuleExecutor {
     }
     
     func execute(_ rule: String, context: ExecutionContext) throws -> RuleResult {
-        guard let html = context.document as? String else {
+        // 文档可能是 SwiftSoup.Document（不再是字符串），这里做兼容取值
+        let html: String
+        if let raw = context.htmlString, !raw.isEmpty {
+            html = raw
+        } else if let raw = context.document as? String {
+            html = raw
+        } else if let element = context.scopedElement {
+            html = (try? element.outerHtml()) ?? ""
+        } else if let element = context.document as? SwiftSoup.Element {
+            html = (try? element.outerHtml()) ?? ""
+        } else {
             throw RuleError.noDocument
         }
-        
+
+        guard !html.isEmpty else { throw RuleError.noDocument }
+
+        let parsed = LegadoSelector.parse(rule)
+        let xpath = parsed.selector.isEmpty ? rule : parsed.selector
+        let attr = parsed.attr
+
         let doc = try Kanna.HTML(html: html, encoding: .utf8)
-        
+
         var results: [String] = []
-        for node in doc.xpath(rule) {
-            if let text = node.text {
-                results.append(text)
+        for node in doc.xpath(xpath) {
+            let value: String?
+            switch attr.lowercased() {
+            case "text":
+                value = node.text
+            case "html", "innerhtml", "outerhtml", "all":
+                value = node.toHTML
+            case "href":
+                value = node["href"].map { CSSParser.absolute($0, base: context.baseURL) }
+            case "src":
+                value = node["src"].map { CSSParser.absolute($0, base: context.baseURL) }
+            default:
+                value = node[attr]
+            }
+
+            if let value, !value.isEmpty {
+                results.append(value)
             }
         }
-        
+
         if results.count == 1 {
             return .string(results[0])
         } else if !results.isEmpty {
             return .list(results)
         }
-        
+
         return .none
     }
 }
@@ -601,48 +748,37 @@ class JSONPathParser: RuleExecutor {
     }
     
     func execute(_ rule: String, context: ExecutionContext) throws -> RuleResult {
-        if context.jsonDict == nil, let jsonString = context.jsonString {
-            let data = jsonString.data(using: .utf8)!
-            context.jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        }
-        
-        guard let dict = context.jsonDict else {
-            throw RuleError.noDocument
-        }
-        
-        let value = evaluateJSONPath(rule, json: dict)
-        
-        if let string = value as? String {
-            return .string(string)
-        } else if let array = value as? [Any] {
-            let strings = array.compactMap { $0 as? String }
-            return .list(strings)
-        }
-        
-        return .none
-    }
-    
-    private func evaluateJSONPath(_ path: String, json: [String: Any]) -> Any? {
-        let cleanPath = path.replacingOccurrences(of: "$.", with: "")
-        let keys = cleanPath.split(separator: ".").map { String($0) }
-        
-        var current: Any? = json
-        for key in keys {
-            guard let dict = current as? [String: Any] else { return nil }
-            
-            if let bracketRange = key.range(of: "["), key.hasSuffix("]") {
-                let arrayKey = String(key[..<bracketRange.lowerBound])
-                let indexStr = String(key[bracketRange.upperBound...].dropLast())
-                guard let index = Int(indexStr),
-                      let array = dict[arrayKey] as? [[String: Any]],
-                      index < array.count else { return nil }
-                current = array[index]
-            } else {
-                current = dict[key]
+        if context.jsonRoot == nil {
+            if let jsonString = context.jsonString,
+               let data = jsonString.data(using: .utf8) {
+                context.jsonRoot = try? JSONSerialization.jsonObject(with: data)
+            } else if let dict = context.jsonDict {
+                context.jsonRoot = dict
             }
         }
-        
-        return current
+
+        guard let root = context.jsonRoot else {
+            throw RuleError.noDocument
+        }
+
+        let matched = JSONPathEvaluator.evaluate(rule, root: root)
+        guard !matched.isEmpty else { return .none }
+
+        var values: [String] = []
+        for value in matched {
+            if let array = value as? [Any] {
+                for item in array {
+                    let text = JSONPathEvaluator.stringValue(item)
+                    if !text.isEmpty { values.append(text) }
+                }
+            } else {
+                let text = JSONPathEvaluator.stringValue(value)
+                if !text.isEmpty { values.append(text) }
+            }
+        }
+
+        guard !values.isEmpty else { return .none }
+        return values.count == 1 ? .string(values[0]) : .list(values)
     }
 }
 

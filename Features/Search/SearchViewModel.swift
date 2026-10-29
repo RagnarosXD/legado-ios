@@ -65,24 +65,33 @@ class SearchViewModel: ObservableObject {
 
         let enabledSources = sources.filter { $0.enabled && $0.searchUrl != nil }
         var merged: [SearchResult] = []
+        var failures: [String] = []
 
-        await withTaskGroup(of: [SearchResult].self) { group in
-            for source in enabledSources {
-                group.addTask { [keyword] in
-                    do {
-                        return try await self.searchInSource(keyword: keyword, source: source)
-                    } catch {
-                        return []
-                    }
+        // 串行搜索：书源是 Core Data 对象、规则解析会创建 JavaScriptCore 上下文，
+        // 两者都不允许被多个任务并发触碰。之前用 withTaskGroup 并发多源，
+        // 订阅一批带 JS 规则的书源后，首次并发创建 JS VM 会直接闪退。
+        for source in enabledSources {
+            if Task.isCancelled { break }
+
+            do {
+                let partial = try await searchInSource(keyword: keyword, source: source)
+                if !partial.isEmpty {
+                    merged.append(contentsOf: partial)
+                    // 边搜边出结果，避免长等待
+                    searchResults = merged
                 }
-            }
-
-            for await partial in group {
-                merged.append(contentsOf: partial)
+            } catch {
+                // 单个源失败不再中断整体搜索，但把原因带出来，便于判断是书源问题还是 App 问题
+                failures.append("\(source.displayName)：\(error.localizedDescription)")
+                continue
             }
         }
 
-        searchResults = merged
+        if merged.isEmpty, !failures.isEmpty {
+            let preview = failures.prefix(3).joined(separator: "\n")
+            errorMessage = "没有搜索到结果，失败原因：\n\(preview)"
+        }
+
         isSearching = false
     }
     

@@ -71,29 +71,51 @@ class ExecutionContext {
     /// 限定作用域的元素：字段规则要「在当前列表项内」查找，而不是整篇文档
     var scopedElement: SwiftSoup.Element?
     
-    lazy var jsContext: JSContext = {
-        let context = JSContext()!
+    /// JavaScriptCore 的 init 是可失败的（`JSContext()` 返回 `JSContext?`），
+    /// 在多书源并发搜索、首次创建 VM 时偶发返回 nil。之前直接 `JSContext()!` 强解包，
+    /// 一旦返回 nil 就是必崩。这里改为「串行创建 + 短暂重试 + 可选」，失败时由调用方抛错。
+    lazy var jsContext: JSContext? = {
+        ExecutionContext.makeJSContext(owner: self)
+    }()
+
+    private static let jsContextLock = NSLock()
+
+    private static func makeJSContext(owner: ExecutionContext) -> JSContext? {
+        jsContextLock.lock()
+        defer { jsContextLock.unlock() }
+
+        var created: JSContext?
+        for attempt in 0..<3 {
+            if let context = JSContext() {
+                created = context
+                break
+            }
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        }
+
+        guard let context = created else { return nil }
 
         let bridge = JSBridge()
-        bridge.context = self
+        bridge.context = owner
         bridge.inject(into: context)
-        
-        // 注入getVar/setVar
-        context.setValue({ [weak self] (key: String) -> String in
-            self?.variables[key] ?? ""
+
+        // 注入 getVar / setVar / result
+        context.setValue({ [weak owner] (key: String) -> String in
+            owner?.variables[key] ?? ""
         }, forKey: "getVar")
-        
-        context.setValue({ [weak self] (key: String, value: String) in
-            self?.variables[key] = value
+
+        context.setValue({ [weak owner] (key: String, value: String) in
+            owner?.variables[key] = value
         }, forKey: "setVar")
-        
-        // 注入 result
-        context.setValue({ [weak self] () -> String? in
-            self?.lastResult.string
+
+        context.setValue({ [weak owner] () -> String? in
+            owner?.lastResult.string
         }, forKey: "result")
-        
+
         return context
-    }()
+    }
 }
 
 // MARK: - 解析器协议
@@ -854,11 +876,16 @@ class JavaScriptParser: RuleExecutor {
     
     func execute(_ rule: String, context: ExecutionContext) throws -> RuleResult {
         let jsCode = extractJS(rule)
-        
-        context.jsContext.setValue(context.lastResult.string, forKey: "result")
-        context.jsContext.setValue(context.baseURL?.absoluteString, forKey: "baseUrl")
-        
-        let jsValue = context.jsContext.evaluateScript(jsCode)
+
+        // 引擎初始化失败时不再崩溃，交给调用方按「该源解析失败」处理
+        guard let jsContext = context.jsContext else {
+            throw RuleError.executionFailed("JavaScript 引擎初始化失败（内存不足或被系统限制）")
+        }
+
+        jsContext.setValue(context.lastResult.string, forKey: "result")
+        jsContext.setValue(context.baseURL?.absoluteString, forKey: "baseUrl")
+
+        let jsValue = jsContext.evaluateScript(jsCode)
         
         if let string = jsValue?.toString() {
             return .string(string)

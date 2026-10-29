@@ -120,7 +120,7 @@ class WebBook {
         context.baseURL = URL(string: redirectUrl)
         
         let elementCtx = ElementContext(
-            element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8)!) as Any) :
+            element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8) ?? Data()) as Any) :
                      (try SwiftSoup.parse(body) as Any),
             baseUrl: redirectUrl,
             source: source
@@ -312,7 +312,7 @@ class WebBook {
         context.baseURL = URL(string: redirectUrl)
         
         let elementCtx = ElementContext(
-            element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8)!) as Any) :
+            element: isJson ? (try JSONSerialization.jsonObject(with: body.data(using: .utf8) ?? Data()) as Any) :
                      (try SwiftSoup.parse(body) as Any),
             baseUrl: redirectUrl,
             source: source

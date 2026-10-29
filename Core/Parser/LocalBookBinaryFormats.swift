@@ -414,7 +414,6 @@ enum MobiParser {
 
         let html = String(data: htmlData, encoding: .utf8)
             ?? String(data: htmlData, encoding: TextFileDecoder.gb18030)
-            ?? String(data: htmlData, encoding: .utf8, allowLossyConversion: true)
             ?? ""
 
         // MOBI 内部分页标记先转成标题分隔

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import UniformTypeIdentifiers
 
 struct BookshelfView: View {
     @StateObject private var viewModel = BookshelfViewModel()

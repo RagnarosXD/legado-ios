@@ -42,14 +42,7 @@ private struct SinglePageContent: View {
         ZStack {
             viewModel.backgroundColor
             
-            ScrollView(.vertical, showsIndicators: false) {
-                Text(text)
-                    .font(.system(size: viewModel.fontSize))
-                    .foregroundColor(viewModel.textColor)
-                    .lineSpacing(viewModel.lineSpacing)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(viewModel.pagePadding)
-            }
+            PageTextView(text: text, viewModel: viewModel)
         }
         .contentShape(Rectangle())
         .onTapGesture {

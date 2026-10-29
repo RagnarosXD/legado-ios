@@ -50,7 +50,7 @@ ToolbarItem(placement: .navigationBarTrailing) {
                     }
                     
                     Button(action: {
-                        DocumentPickerHelper.shared.present(contentTypes: [.plainText, .epub]) { urls in
+                        DocumentPickerHelper.shared.present(contentTypes: UTType.localBookTypes) { urls in
                             guard let url = urls.first else { return }
                             Task { @MainActor in
                                 do {

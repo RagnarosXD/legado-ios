@@ -198,16 +198,8 @@ private struct PageContent: View {
                 // 背景
                 viewModel.backgroundColor.ignoresSafeArea()
                 
-                // 文本内容
-                ScrollView(.vertical, showsIndicators: false) {
-                    Text(text)
-                        .font(.system(size: viewModel.fontSize))
-                        .foregroundColor(viewModel.textColor)
-                        .lineSpacing(viewModel.lineSpacing)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(viewModel.pagePadding)
-                        .textSelection(.enabled)
-                }
+                // 文本内容（CoreText 绘制，排版与分页一致）
+                PageTextView(text: text, viewModel: viewModel)
                 
                 // 点击区域覆盖层
                 tapZonesOverlay(width: geometry.size.width)

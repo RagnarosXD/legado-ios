@@ -31,8 +31,11 @@ struct PagedReaderView: View {
         GeometryReader { geometry in
             ZStack {
                 viewModel.backgroundColor.ignoresSafeArea()
-                
-                if pages.isEmpty {
+
+                if !viewModel.chapterImages.isEmpty {
+                    // CBZ 等图片章节：直接纵向滚动看图
+                    ImageChapterScrollView(images: viewModel.chapterImages)
+                } else if pages.isEmpty {
                     if viewModel.isLoading {
                         ProgressView()
                     } else if viewModel.chapterContent != nil {
@@ -47,7 +50,7 @@ struct PagedReaderView: View {
                 }
                 
                 // 页码指示器
-                if !pages.isEmpty {
+                if !pages.isEmpty && viewModel.chapterImages.isEmpty {
                     VStack {
                         Spacer()
                         pageIndicator
@@ -69,6 +72,24 @@ struct PagedReaderView: View {
                 invalidateAndResplit()
             }
             .onChange(of: viewModel.lineSpacing) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.paragraphSpacing) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.letterSpacing) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.firstLineIndentChars) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.lineHeightMultiple) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.textJustified) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.fontFamily) { _ in
                 invalidateAndResplit()
             }
         }
@@ -122,9 +143,10 @@ struct PagedReaderView: View {
         ScrollView {
             if let content = viewModel.chapterContent {
                 Text(content)
-                    .font(.system(size: viewModel.fontSize))
+                    .font(viewModel.readerFont)
                     .foregroundColor(viewModel.textColor)
-                    .lineSpacing(viewModel.lineSpacing)
+                    .lineSpacing(viewModel.effectiveLineSpacing)
+                    .kerning(viewModel.letterSpacing)
                     .padding(viewModel.pagePadding)
                     .textSelection(.enabled)
             }
@@ -169,18 +191,7 @@ struct PagedReaderView: View {
         
         guard containerSize.width > 0, containerSize.height > 0 else { return }
         
-        let padding = viewModel.pagePadding
-        let config = PageConfig.from(
-            fontSize: viewModel.fontSize,
-            lineSpacing: viewModel.lineSpacing,
-            padding: UIEdgeInsets(
-                top: padding.top,
-                left: padding.leading,
-                bottom: padding.bottom,
-                right: padding.trailing
-            ),
-            containerSize: containerSize
-        )
+        let config = viewModel.makePageConfig(containerSize: containerSize)
         
         // 使用缓存分页
         let result = PageSplitCache.shared.getOrSplit(text: content, config: config)
@@ -229,14 +240,7 @@ struct InstantPageView: View {
                 viewModel.backgroundColor
                 
                 if currentPage >= 0 && currentPage < pages.count {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Text(pages[currentPage])
-                            .font(.system(size: viewModel.fontSize))
-                            .foregroundColor(viewModel.textColor)
-                            .lineSpacing(viewModel.lineSpacing)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(viewModel.pagePadding)
-                    }
+                    PageTextView(text: pages[currentPage], viewModel: viewModel)
                 }
             }
             .contentShape(Rectangle())

@@ -123,6 +123,9 @@
 		1A0000000000008B /* RemoteBookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1000000000008B /* RemoteBookView.swift */; };
 		1A0000000000008C /* BackgroundCacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1000000000008C /* BackgroundCacheService.swift */; };
 		1A0000000000008D /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1000000000008D /* IntegrationTests.swift */; };
+		1A00000000000090 /* LocalBookParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000090 /* LocalBookParser.swift */; };
+		1A00000000000091 /* LocalBookBinaryFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000091 /* LocalBookBinaryFormats.swift */; };
+		1A00000000000092 /* PageTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000092 /* PageTextView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -241,6 +244,9 @@
 		1A1000000000008B /* RemoteBookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteBookView.swift; sourceTree = "<group>"; };
 		1A1000000000008C /* BackgroundCacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundCacheService.swift; sourceTree = "<group>"; };
 		1A1000000000008D /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
+		1A10000000000090 /* LocalBookParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocalBookParser.swift"; sourceTree = "<group>"; };
+		1A10000000000091 /* LocalBookBinaryFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocalBookBinaryFormats.swift"; sourceTree = "<group>"; };
+		1A10000000000092 /* PageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Reader/PageViews/PageTextView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -398,6 +404,8 @@
 			isa = PBXGroup;
 			children = (
 				1A10000000000034 /* EPUBParser.swift */,
+				1A10000000000090 /* LocalBookParser.swift */,
+				1A10000000000091 /* LocalBookBinaryFormats.swift */,
 				1A10000000000080 /* TableOfContentsParser.swift */,
 			);
 			path = Parser;
@@ -452,6 +460,7 @@
 				1A10000000000023 /* ReaderViewModel.swift */,
 				1A10000000000083 /* ChangeSourceSheet.swift */,
 				1A10000000000084 /* BookmarkSheet.swift */,
+				1A10000000000092 /* PageTextView.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -669,6 +678,9 @@
 				1A00000000000018 /* ReplaceEngine.swift in Sources */,
 				1A0000000000006C /* ReplaceEngineEnhanced.swift in Sources */,
 				1A00000000000019 /* RuleSplitter.swift in Sources */,
+				1A00000000000090 /* LocalBookParser.swift in Sources */,
+				1A00000000000091 /* LocalBookBinaryFormats.swift in Sources */,
+				1A00000000000092 /* PageTextView.swift in Sources */,
 				1A00000000000047 /* TemplateEngine.swift in Sources */,
 				1A00000000000048 /* JSBridge.swift in Sources */,
 				1A0000000000006B /* SearchOptimizer.swift in Sources */,
@@ -928,7 +940,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -945,7 +957,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -961,7 +973,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -978,7 +990,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

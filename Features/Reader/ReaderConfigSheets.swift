@@ -113,6 +113,9 @@ struct ReadStyleSheet: View {
     @AppStorage("readerLineSpacing") private var lineSpacing: Double = 8
     @AppStorage("readerParagraphSpacing") private var paragraphSpacing: Double = 12
     @AppStorage("readerLetterSpacing") private var letterSpacing: Double = 0
+    @AppStorage("readerFirstLineIndent") private var firstLineIndent: Double = 2
+    @AppStorage("readerLineHeightMultiple") private var lineHeightMultiple: Double = 1.15
+    @AppStorage("readerJustified") private var justified: Bool = false
     
     var body: some View {
         NavigationView {
@@ -174,6 +177,41 @@ struct ReadStyleSheet: View {
                         viewModel.letterSpacing = letterSpacing
                     }
                 }
+
+                Section("排版精度") {
+                    HStack {
+                        Text("首行缩进")
+                            .frame(width: 80, alignment: .leading)
+                        Slider(value: $firstLineIndent, in: 0...4, step: 0.5)
+                        Text("\(firstLineIndent, specifier: "%.1f") 字")
+                            .font(.caption)
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                    .onChange(of: firstLineIndent) { _ in
+                        viewModel.firstLineIndentChars = firstLineIndent
+                    }
+
+                    HStack {
+                        Text("行高倍数")
+                            .frame(width: 80, alignment: .leading)
+                        Slider(value: $lineHeightMultiple, in: 0.8...2.0, step: 0.05)
+                        Text("\(lineHeightMultiple, specifier: "%.2f")")
+                            .font(.caption)
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                    .onChange(of: lineHeightMultiple) { _ in
+                        viewModel.lineHeightMultiple = lineHeightMultiple
+                    }
+
+                    Toggle("两端对齐", isOn: $justified)
+                        .onChange(of: justified) { _ in
+                            viewModel.textJustified = justified
+                        }
+
+                    Text("首行缩进、字距、行高倍数与两端对齐均按 CoreText 排版，分页结果与屏幕显示严格一致。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 
                 Section {
                     Button("恢复默认") {
@@ -185,11 +223,23 @@ struct ReadStyleSheet: View {
                         viewModel.lineSpacing = 8
                         viewModel.paragraphSpacing = 12
                         viewModel.letterSpacing = 0
+                        firstLineIndent = 2
+                        lineHeightMultiple = 1.15
+                        justified = false
+                        viewModel.firstLineIndentChars = 2
+                        viewModel.lineHeightMultiple = 1.15
+                        viewModel.textJustified = false
                     }
                 }
             }
             .navigationTitle("阅读样式")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // 与 ViewModel 当前值对齐（ViewModel 从 UserDefaults 的 reader.* 键恢复）
+                firstLineIndent = Double(viewModel.firstLineIndentChars)
+                lineHeightMultiple = Double(viewModel.lineHeightMultiple)
+                justified = viewModel.textJustified
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {

@@ -79,15 +79,41 @@
 | 书源管理（导入/导出/订阅/启用禁用/调试器/二维码） | ✅ |
 | 聚合搜索（多源并发） | ✅ |
 | 书籍详情 / 目录 / 正文（含翻页与缓存） | ✅ |
-| 阅读器（CoreText 分页、仿真翻页、自动翻页、主题、字号行距、进度、书签） | ✅ |
-| 本地书籍（TXT / EPUB） | ✅ 基础可用（EPUB 为自实现解析，复杂排版可能降级） |
+| 阅读器（CoreText 分页与同源渲染、仿真/覆盖/滑动翻页、自动翻页、主题、书签） | ✅ |
+| 排版精度（字距、首行缩进、行高倍数、段距、两端对齐） | ✅ 1.1 新增 |
+| 本地书籍（TXT / EPUB / PDF / MOBI / AZW3 / HTML / Markdown / CBZ） | ✅ 1.1 起支持；UMD 暂不支持 |
 | 替换净化规则 | ✅ 引擎可用（正文链路已接入 `replaceRegex`） |
 | TTS 朗读、WebDAV 同步、阅读统计 | ✅ 有实现，未做逐项回归 |
 | RSS 订阅 | ⚠️ 列表与阅读有实现；`legado://import/rssSource` 深链导入仍是占位 |
-| 漫画阅读 | ⚠️ 单页竖屏，实验性 |
+| 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 构建
+## 5. 1.1 更新：本地格式 + 排版精度
+
+### 本地书籍格式
+
+| 格式 | 说明 |
+| --- | --- |
+| TXT | 自动识别 UTF-8 / UTF-16 / GB18030 / Big5；分章支持 `第X章/回/节/卷`、`Chapter N`、序章/楔子/番外；识别不到标题时按长度切块 |
+| EPUB | 复用自实现 `EPUBParser`（OPF + spine + 目录 + 封面） |
+| PDF | PDFKit 逐页抽取文字，每 8 页一章，首页渲染封面；扫描版（无文字层）会明确提示不支持 OCR |
+| MOBI / AZW3 | 自解析 PalmDB + MOBI Header + EXTH（书名/作者），PalmDOC 解压；HUFF/CDIC 压缩提示转 EPUB |
+| HTML / XHTML | 按 h1~h3 分章，标签清洗后保留段落换行 |
+| Markdown | 按 `#` 标题分章，去掉强调/链接/列表标记 |
+| CBZ | 自实现 zip（stored + deflate）解压到 `Documents/Manga/`，按页图片纵向阅读 |
+
+导入时每章正文会落盘到 `Documents/LocalChapters/<bookId>/`，翻页直接读缓存，不再每次重新解析整本。
+
+### 排版精度
+
+之前分页用 CoreText、显示却用 SwiftUI `Text`，两边行高/段距算法不同，导致「分页边界」和「屏幕显示」对不上，字距、首行缩进、段距设置也基本不生效。1.1 把两者统一：
+
+- 分页与渲染共用同一份 `NSAttributedString`（`PageSplitter.attributedText`），正文改为 CoreText 直绘（`PageTextView`）
+- 新增排版项：字距（kern）、首行缩进（0–4 字）、行高倍数（0.8–2.0）、两端对齐
+- 行末断行策略改为 `pushOut`（允许标点挤压，中文行尾更整齐）
+- 滚动模式把行高倍数折算成行距，保持与分页模式视觉一致
+
+## 6. 构建
 
 ### 云端（无需 Mac）
 
@@ -111,7 +137,8 @@ open Legado.xcodeproj    # ⌘R
 `Type Check` workflow 用 Linux 上的 Swift 编译器做两件事，1 分钟内出结果：
 
 1. `swiftc -typecheck` 检查纯 Foundation 的 `LegadoSelector` / `JSONPathEvaluator` / `HTMLTextExtractor`；
-2. 用**真实 SwiftSoup** + JavaScriptCore/Kanna/CryptoKit 的桩，编译 `RuleEngine.swift`、`RuleSplitter.swift`、`TemplateEngine.swift`、`JSBridge.swift`。
+2. 用**真实 SwiftSoup** + JavaScriptCore/Kanna/CryptoKit 的桩，编译 `RuleEngine.swift`、`RuleSplitter.swift`、`TemplateEngine.swift`、`JSBridge.swift`；
+3. `LocalBookParser.swift`（TXT/HTML/Markdown 分章与编码识别）也会一起编译，EPUB/PDF/MOBI/CBZ 用桩顶替。
 
 本地还可以跑括号/字符串配平自检：
 
@@ -119,13 +146,16 @@ open Legado.xcodeproj    # ⌘R
 python tools/check_swift_balance.py Core
 ```
 
-## 6. 已知差距（需要继续做）
+## 7. 已知差距（需要继续做）
 
 - **书源变量持久化**：`java.put` / `@put` 只在单次解析内有效，未写回 `BookSource.variable`；依赖登录态变量的书源需要补这一层。
 - **`loginCheckJs` / `jsLib`**：字段存在，尚未在 JS 上下文里预置。
 - **`webJs` / `sourceRegex`**：正文规则里的这两个字段尚未执行。
 - **单元测试未接线**：`Tests/Unit/RuleEngineTests.swift` 是规则引擎回归测试（覆盖 `class.` 语法、`##`、`||`、JSONPath 通配/递归、XPath、`java.*`），但 Xcode 工程里没有测试 target，该文件不参与编译；目前靠 `Type Check` workflow 做类型检查、靠 `tools/check_swift_balance.py` 做结构自检。把它接成真正的测试 target 是下一步。
 - **RSS 深链导入**：仍是占位实现。
+- **UMD**：仅有格式识别，解析未实现（会提示先转成 TXT/EPUB）。
+- **PDF 扫描版**：无文字层时无法提取正文，未做 OCR。
+- **CBZ 漫画**：按页纵向阅读，暂无双页/左右翻页/预加载。
 - **合规**：本项目不含任何书籍内容、不内置书源；请只导入你有权使用的内容。
 
 ## 7. 技术栈

@@ -7,12 +7,15 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 import CoreData
 
 @MainActor
 class ReaderViewModel: ObservableObject {
     // MARK: - Published 属性
     @Published var chapterContent: String?
+    /// 图片章节（CBZ 漫画）的图片列表，非空时阅读器走图片模式
+    @Published var chapterImages: [URL] = []
     @Published var currentChapter: BookChapter?
     @Published var currentChapterIndex: Int = 0
     @Published var totalChapters: Int = 0
@@ -54,8 +57,28 @@ class ReaderViewModel: ObservableObject {
     @Published var textColor: Color = .black
     
     // MARK: - 新增阅读设置
-    @Published var paragraphSpacing: CGFloat = 12
-    @Published var letterSpacing: CGFloat = 0
+    @Published var paragraphSpacing: CGFloat = 12 {
+        didSet { UserDefaults.standard.set(Double(paragraphSpacing), forKey: "reader.paragraphSpacing") }
+    }
+    @Published var letterSpacing: CGFloat = 0 {
+        didSet { UserDefaults.standard.set(Double(letterSpacing), forKey: "reader.letterSpacing") }
+    }
+    /// 段首缩进字数（中文习惯 2 字）
+    @Published var firstLineIndentChars: CGFloat = 2 {
+        didSet { UserDefaults.standard.set(Double(firstLineIndentChars), forKey: "reader.firstLineIndent") }
+    }
+    /// 行高倍数
+    @Published var lineHeightMultiple: CGFloat = 1.15 {
+        didSet { UserDefaults.standard.set(Double(lineHeightMultiple), forKey: "reader.lineHeightMultiple") }
+    }
+    /// 两端对齐
+    @Published var textJustified: Bool = false {
+        didSet { UserDefaults.standard.set(textJustified, forKey: "reader.justified") }
+    }
+    /// 字体族（为空用系统字体）
+    @Published var fontFamily: String? = nil {
+        didSet { UserDefaults.standard.set(fontFamily, forKey: "reader.fontFamily") }
+    }
     
     // MARK: - 私有属性
     private var ruleEngine: RuleEngine = RuleEngine()
@@ -88,6 +111,60 @@ class ReaderViewModel: ObservableObject {
         if let storedTheme = defaults.string(forKey: "reader.theme") {
             applyTheme(themeFromStorage(storedTheme))
         }
+
+        // 排版精度设置（0 视为未设置，因为 0 是"无缩进/无字距"的合法值，用 object 判断更准）
+        if defaults.object(forKey: "reader.paragraphSpacing") != nil {
+            paragraphSpacing = CGFloat(defaults.double(forKey: "reader.paragraphSpacing"))
+        }
+        if defaults.object(forKey: "reader.letterSpacing") != nil {
+            letterSpacing = CGFloat(defaults.double(forKey: "reader.letterSpacing"))
+        }
+        if defaults.object(forKey: "reader.firstLineIndent") != nil {
+            firstLineIndentChars = CGFloat(defaults.double(forKey: "reader.firstLineIndent"))
+        }
+        if defaults.object(forKey: "reader.lineHeightMultiple") != nil {
+            lineHeightMultiple = CGFloat(defaults.double(forKey: "reader.lineHeightMultiple"))
+        }
+        if defaults.object(forKey: "reader.justified") != nil {
+            textJustified = defaults.bool(forKey: "reader.justified")
+        }
+        if let family = defaults.string(forKey: "reader.fontFamily"), !family.isEmpty {
+            fontFamily = family
+        }
+    }
+
+    /// 供 SwiftUI Text 使用的字体（滚动模式 / 设置预览）
+    var readerFont: Font {
+        if let family = fontFamily, !family.isEmpty, family != "System" {
+            return .custom(family, size: fontSize)
+        }
+        return .system(size: fontSize)
+    }
+
+    /// 滚动模式下把「行高倍数」折算成额外行距（SwiftUI Text 不支持 lineHeightMultiple）
+    var effectiveLineSpacing: CGFloat {
+        max(0, lineSpacing + (lineHeightMultiple - 1) * fontSize)
+    }
+
+    /// 当前排版配置（分页与渲染共用）
+    func makePageConfig(containerSize: CGSize) -> PageConfig {
+        PageConfig.from(
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            letterSpacing: letterSpacing,
+            firstLineIndentChars: firstLineIndentChars,
+            lineHeightMultiple: lineHeightMultiple,
+            justified: textJustified,
+            padding: UIEdgeInsets(
+                top: pagePadding.top,
+                left: pagePadding.leading,
+                bottom: pagePadding.bottom,
+                right: pagePadding.trailing
+            ),
+            containerSize: containerSize,
+            fontFamily: fontFamily
+        )
     }
 
     private func themeFromStorage(_ raw: String) -> ReaderTheme {
@@ -234,14 +311,14 @@ class ReaderViewModel: ObservableObject {
         do {
             // 尝试从缓存加载
             if let cachedContent = try? await loadCachedChapter(chapters[index]) {
-                chapterContent = applyReplaceRulesIfNeeded(cachedContent, chapter: chapters[index])
+                applyContent(cachedContent, chapter: chapters[index])
                 isLoading = false
                 return
             }
             
-            // 从网络加载
+            // 从网络 / 本地文件加载
             let content = try await fetchChapterContent(chapters[index])
-            chapterContent = applyReplaceRulesIfNeeded(content, chapter: chapters[index])
+            applyContent(content, chapter: chapters[index])
             
             // 缓存章节
             try await cacheChapter(chapters[index], content: content)
@@ -432,6 +509,26 @@ class ReaderViewModel: ObservableObject {
         return try String(contentsOf: cacheURL, encoding: .utf8)
     }
     
+    /// 统一处理章节正文：图片章节 → 图片列表；文本章节 → 走替换规则
+    private func applyContent(_ raw: String, chapter: BookChapter) {
+        if raw.hasPrefix(LocalChapter.imagesMarker) {
+            let lines = raw.components(separatedBy: "\n")
+            let paths = lines
+                .dropFirst()
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            chapterImages = paths
+                .map { URL(fileURLWithPath: $0) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+            chapterContent = nil
+            totalPages = 1
+        } else {
+            chapterImages = []
+            chapterContent = applyReplaceRulesIfNeeded(raw, chapter: chapter)
+        }
+    }
+
     private func fetchChapterContent(_ chapter: BookChapter) async throws -> String {
         guard let book = currentBook else {
             throw ReaderError.noBook
@@ -458,52 +555,26 @@ class ReaderViewModel: ObservableObject {
         return try await WebBook.getContent(source: source, book: book, chapter: chapter)
     }
     
-    /// 加载本地 TXT 书籍的章节内容
+    /// 加载本地书籍的章节内容
     private func loadLocalChapterContent(_ chapter: BookChapter) async throws -> String {
-        guard let book = currentBook else { throw ReaderError.noBook }
-        
-        let fileURL = URL(fileURLWithPath: book.bookUrl)
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-        
-        // 通过章节索引找到对应的内容段
-        // 使用与 LocalBookViewModel 相同的分章逻辑
-        let chapterPatterns = [
-            #"^第[零一二三四五六七八九十百千万0-9]+[章回卷节部篇]"#,
-            #"^第[0-9]+章"#,
-            #"^Chapter [0-9]+"#,
-            #"^\s*第[0-9一二三四五六七八九十]+节"#
-        ]
-        
-        var chapters: [(title: String, content: String)] = []
-        var currentTitle: String?
-        var currentContent = ""
-        
-        for line in content.components(separatedBy: .newlines) {
-            var isChapterStart = false
-            for pattern in chapterPatterns {
-                if let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines) {
-                    let range = NSRange(line.startIndex..., in: line)
-                    if regex.firstMatch(in: line, range: range) != nil {
-                        isChapterStart = true
-                        break
-                    }
-                }
-            }
-            
-            if isChapterStart {
-                if let title = currentTitle { chapters.append((title, currentContent)) }
-                currentTitle = line.trimmingCharacters(in: .whitespaces)
-                currentContent = ""
-            } else {
-                currentContent += line + "\n"
-            }
+        // 1.1 起导入时已把每章正文落盘（绝对路径缓存），直接命中
+        if let cachePath = chapter.cachePath,
+           cachePath.hasPrefix("/"),
+           FileManager.default.fileExists(atPath: cachePath),
+           let text = try? String(contentsOfFile: cachePath, encoding: .utf8) {
+            return text
         }
-        if let title = currentTitle { chapters.append((title, currentContent)) }
-        if chapters.isEmpty { return content }
-        
-        let idx = Int(chapter.index)
-        guard idx >= 0 && idx < chapters.count else { throw ReaderError.notCached }
-        return chapters[idx].content.trimmingCharacters(in: .whitespaces)
+
+        guard let book = currentBook else { throw ReaderError.noBook }
+
+        // 兜底：旧版本导入的书没有章节缓存，用统一解析器重新解析
+        let url = URL(fileURLWithPath: book.bookUrl)
+        let result = try await LocalBookParser.parse(url: url)
+        let index = Int(chapter.index)
+        guard index >= 0, index < result.chapters.count else {
+            throw ReaderError.notCached
+        }
+        return result.chapters[index].content
     }
     
     private func cacheChapter(_ chapter: BookChapter, content: String) async throws {

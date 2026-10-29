@@ -4,9 +4,20 @@ on:
   push:
     branches: [ main, develop ]
     tags: [ 'v*' ]
+    # 纯文档/工具脚本改动不触发构建：省 macOS 额度，也避免"排队抢占失败"刷出一堆无产物运行
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'tools/**'
+      - '.gitignore'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+
+# 同一分支只保留最新一次运行，避免多个运行互相抢 macOS runner
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -110,12 +121,28 @@ jobs:
         )
         echo "IPA_PATH=$IPA_DIR/Legado-unsigned.ipa" >> "$GITHUB_ENV"
 
+    - name: Job Summary
+      if: success()
+      run: |
+        {
+          echo "### 构建产物（本页底部 Artifacts 区域下载）"
+          echo ""
+          echo "| Artifact | 用途 |"
+          echo "| --- | --- |"
+          echo "| \`Legado-iOS-IPA\` | 未签名 IPA，用 ESign / Feather / Sideloadly 自签安装 |"
+          echo "| \`Legado-iOS-App\` | 未签名 .app 目录 |"
+          echo "| \`Legado-xcresult\` | Xcode 构建结果包（调试用） |"
+          echo ""
+          echo "IPA 大小：$(du -h "$IPA_PATH" | cut -f1)"
+        } >> "$GITHUB_STEP_SUMMARY"
+
     - name: Upload Xcode Result Bundle
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: Legado-xcresult
         path: ${{ env.RESULT_BUNDLE }}
+        retention-days: 7
         if-no-files-found: ignore
     
     - name: Upload Build Artifact
@@ -124,6 +151,8 @@ jobs:
       with:
         name: Legado-iOS-App
         path: ${{ env.DERIVED_DATA }}/Build/Products/Release-iphoneos/Legado.app
+        retention-days: 14
+        if-no-files-found: error
 
     - name: Upload IPA Artifact
       if: success()
@@ -131,6 +160,8 @@ jobs:
       with:
         name: Legado-iOS-IPA
         path: ${{ env.IPA_PATH }}
+        retention-days: 14
+        if-no-files-found: error
 
   release:
     name: Create Release

@@ -20,26 +20,12 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
-            // 发现
-            NavigationStack { DiscoveryView() }
-                .tabItem {
-                    Image(systemName: "safari")
-                }
-                .tag(1)
-            
-            // RSS订阅
-            NavigationStack { RSSSubscriptionView() }
-                .tabItem {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                }
-                .tag(2)
-            
             // 我的
             SettingsView()
                 .tabItem {
                     Image(systemName: "person.crop.circle")
                 }
-                .tag(3)
+                .tag(1)
         }
         .accentColor(.blue)
     }
@@ -115,12 +101,35 @@ struct SettingsView: View {
                     }
                 }
                 
+                // 诊断
+                Section(header: Label("诊断", systemImage: "ladybug")) {
+                    ShareLink(item: AppLogger.shared.currentLogFile) {
+                        HStack {
+                            Text("导出运行日志")
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("日志文件")
+                        Spacer()
+                        Text("\(AppLogger.shared.allLogFiles().count) 个")
+                            .foregroundColor(.secondary)
+                    }
+
+                    Text("闪退后重新打开 App，在「导出日志」里分享最新文件即可定位问题。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
                 // 关于
                 Section(header: Label("关于", systemImage: "info.circle")) {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("1.0.0 (Alpha)")
+                        Text(AppLogger.appVersion)
                             .foregroundColor(.secondary)
                     }
                     

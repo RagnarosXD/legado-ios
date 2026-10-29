@@ -49,8 +49,16 @@ jobs:
 
     - name: Prepare Build Paths
       run: |
+        # 版本号：tag 构建取 tag 名（v1.1.2 -> 1.1.2），普通 push 取工程里的 MARKETING_VERSION
+        VERSION="${GITHUB_REF_NAME#v}"
+        if [ "${GITHUB_REF_TYPE}" != "tag" ] || [ -z "$VERSION" ]; then
+          VERSION=$(grep -m1 'MARKETING_VERSION' Legado.xcodeproj/project.pbxproj | sed 's/.*MARKETING_VERSION = //; s/;//' | tr -d ' \t')
+        fi
+        echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+        echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
         echo "DERIVED_DATA=$RUNNER_TEMP/LegadoDerivedData" >> "$GITHUB_ENV"
-        echo "RESULT_BUNDLE=$RUNNER_TEMP/LegadoResults.xcresult" >> "$GITHUB_ENV"
+        echo "RESULT_BUNDLE=$RUNNER_TEMP/LegadoResults-$VERSION.xcresult" >> "$GITHUB_ENV"
+        echo "构建版本：$VERSION build ${GITHUB_RUN_NUMBER}"
     
     - name: Resolve SPM Dependencies
       run: >
@@ -72,6 +80,8 @@ jobs:
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
+          MARKETING_VERSION="$APP_VERSION" \
+          CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
           IPHONEOS_DEPLOYMENT_TARGET=16.0 2>&1 | tee build.log
 
     # 把编译错误作为 annotation 打出来：不登录 GitHub 也能在运行页面直接看到
@@ -111,27 +121,39 @@ jobs:
     - name: Package Unsigned IPA
       if: success()
       run: |
+        APP_DIR="$DERIVED_DATA/Build/Products/Release-iphoneos/Legado.app"
         IPA_DIR="$RUNNER_TEMP/ipa"
+        IPA_NAME="Legado-$APP_VERSION.ipa"
+
         rm -rf "$IPA_DIR"
         mkdir -p "$IPA_DIR/Payload"
-        cp -R "$DERIVED_DATA/Build/Products/Release-iphoneos/Legado.app" "$IPA_DIR/Payload/"
+        cp -R "$APP_DIR" "$IPA_DIR/Payload/"
+
+        # IPA 内的版本号必须和本次 release 的版本一致
+        PLIST="$IPA_DIR/Payload/Legado.app/Info.plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST" 2>/dev/null || true
+        echo "IPA 内版本：$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" 2>/dev/null) ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST" 2>/dev/null))"
+
         (
           cd "$IPA_DIR"
-          /usr/bin/zip -qry "Legado-unsigned.ipa" Payload
+          /usr/bin/zip -qry "$IPA_NAME" Payload
         )
-        echo "IPA_PATH=$IPA_DIR/Legado-unsigned.ipa" >> "$GITHUB_ENV"
+
+        echo "IPA_PATH=$IPA_DIR/$IPA_NAME" >> "$GITHUB_ENV"
+        echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
 
     - name: Job Summary
       if: success()
       run: |
         {
-          echo "### 构建产物（本页底部 Artifacts 区域下载）"
+          echo "### 构建产物 v$APP_VERSION（build $BUILD_NUMBER）"
           echo ""
-          echo "| Artifact | 用途 |"
-          echo "| --- | --- |"
-          echo "| \`Legado-iOS-IPA\` | 未签名 IPA，用 ESign / Feather / Sideloadly 自签安装 |"
-          echo "| \`Legado-iOS-App\` | 未签名 .app 目录 |"
-          echo "| \`Legado-xcresult\` | Xcode 构建结果包（调试用） |"
+          echo "| Artifact | 文件 | 用途 |"
+          echo "| --- | --- | --- |"
+          echo "| \`Legado-iOS-IPA-$APP_VERSION\` | \`$IPA_NAME\` | 未签名 IPA，用 ESign / Feather / Sideloadly 自签安装 |"
+          echo "| \`Legado-iOS-App-$APP_VERSION\` | \`Legado.app\` | 未签名 .app 目录 |"
+          echo "| \`Legado-xcresult-$APP_VERSION\` | \`.xcresult\` | Xcode 构建结果包（调试用） |"
           echo ""
           echo "IPA 大小：$(du -h "$IPA_PATH" | cut -f1)"
         } >> "$GITHUB_STEP_SUMMARY"
@@ -140,16 +162,16 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: Legado-xcresult
+        name: Legado-xcresult-${{ env.APP_VERSION }}
         path: ${{ env.RESULT_BUNDLE }}
         retention-days: 7
         if-no-files-found: ignore
-    
+
     - name: Upload Build Artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Legado-iOS-App
+        name: Legado-iOS-App-${{ env.APP_VERSION }}
         path: ${{ env.DERIVED_DATA }}/Build/Products/Release-iphoneos/Legado.app
         retention-days: 14
         if-no-files-found: error
@@ -158,7 +180,7 @@ jobs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Legado-iOS-IPA
+        name: Legado-iOS-IPA-${{ env.APP_VERSION }}
         path: ${{ env.IPA_PATH }}
         retention-days: 14
         if-no-files-found: error
@@ -179,12 +201,15 @@ jobs:
     - name: Download IPA Artifact
       uses: actions/download-artifact@v4
       with:
-        name: Legado-iOS-IPA
+        # artifact 名带版本号（Legado-iOS-IPA-1.1.2），这里按前缀取
+        pattern: Legado-iOS-IPA-*
         path: release/
-    
+        merge-multiple: true
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        files: release/Legado-unsigned.ipa
+        # 产物文件名以版本号结尾：Legado-1.1.2.ipa
+        files: release/*.ipa
         generate_release_notes: true
         draft: false

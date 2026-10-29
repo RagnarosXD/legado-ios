@@ -57,19 +57,23 @@ class WebBook {
             source: source
         )
         
+        AppLogger.info("WebBook", "搜索URL \(analyzedUrl.url.prefix(220))")
+
         // 2. 发起请求
         let (body, redirectUrl) = try await AnalyzeUrl.getResponseBody(analyzedUrl: analyzedUrl)
-        
+
         guard !body.isEmpty else {
+            AppLogger.warn("WebBook", "搜索响应为空 \(source.bookSourceName)")
             throw WebBookError.emptyResponse
         }
-        
+
         // 3. 解析搜索结果
         guard let searchRule = source.getSearchRule() else {
+            AppLogger.error("WebBook", "缺少搜索规则 \(source.bookSourceName)")
             throw WebBookError.noRule("搜索规则")
         }
-        
-        return try parseBookList(
+
+        let parsed = try parseBookList(
             source: source,
             body: body,
             baseUrl: redirectUrl,
@@ -82,6 +86,9 @@ class WebBook {
             lastChapterRule: searchRule.lastChapter,
             wordCountRule: searchRule.wordCount
         )
+
+        AppLogger.info("WebBook", "搜索解析 \(source.bookSourceName) 结果=\(parsed.count)")
+        return parsed
     }
     
     // MARK: - 获取书籍详情

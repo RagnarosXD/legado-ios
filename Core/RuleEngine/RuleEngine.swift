@@ -95,7 +95,10 @@ class ExecutionContext {
             }
         }
 
-        guard let context = created else { return nil }
+        guard let context = created else {
+            AppLogger.error("JS", "JSContext 创建失败（已重试 3 次），本轮规则将无法执行 JS")
+            return nil
+        }
 
         let bridge = JSBridge()
         bridge.context = owner

@@ -67,25 +67,40 @@ class SearchViewModel: ObservableObject {
         var merged: [SearchResult] = []
         var failures: [String] = []
 
+        AppLogger.info("Search", "开始搜索 keyword=\(keyword) 书源数=\(enabledSources.count)")
+
         // 串行搜索：书源是 Core Data 对象、规则解析会创建 JavaScriptCore 上下文，
         // 两者都不允许被多个任务并发触碰。之前用 withTaskGroup 并发多源，
         // 订阅一批带 JS 规则的书源后，首次并发创建 JS VM 会直接闪退。
         for source in enabledSources {
-            if Task.isCancelled { break }
+            if Task.isCancelled {
+                AppLogger.warn("Search", "搜索被取消")
+                break
+            }
+
+            let startedAt = Date()
+            AppLogger.info("Search", "书源开始 \(source.displayName) type=\(source.bookSourceType) url=\(source.bookSourceUrl)")
 
             do {
                 let partial = try await searchInSource(keyword: keyword, source: source)
+                let cost = Int(Date().timeIntervalSince(startedAt) * 1000)
+                AppLogger.info("Search", "书源完成 \(source.displayName) 结果=\(partial.count) 耗时=\(cost)ms")
+
                 if !partial.isEmpty {
                     merged.append(contentsOf: partial)
                     // 边搜边出结果，避免长等待
                     searchResults = merged
                 }
             } catch {
+                let cost = Int(Date().timeIntervalSince(startedAt) * 1000)
                 // 单个源失败不再中断整体搜索，但把原因带出来，便于判断是书源问题还是 App 问题
+                AppLogger.error("Search", "书源失败 \(source.displayName) 耗时=\(cost)ms 错误=\(error)")
                 failures.append("\(source.displayName)：\(error.localizedDescription)")
                 continue
             }
         }
+
+        AppLogger.info("Search", "搜索结束 结果=\(merged.count) 失败源=\(failures.count)")
 
         if merged.isEmpty, !failures.isEmpty {
             let preview = failures.prefix(3).joined(separator: "\n")

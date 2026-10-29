@@ -82,6 +82,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        CrashReporter.install()
+        AppLogger.info("App", "启动 legado \(AppLogger.appVersion)，日志目录：\(AppLogger.directory.lastPathComponent)")
+
+        // 启动 3 秒后仍存活才标记为「正常启动」，用于下次判断是否异常退出
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            CrashReporter.markLaunchFinished()
+            AppLogger.info("App", "启动完成")
+        }
+
         _ = CoreDataStack.shared
         return true
     }

@@ -226,14 +226,20 @@ class AnalyzeUrl {
             return (result.html, result.finalURL)
         }
         
+        let startedAt = Date()
+        AppLogger.debug("HTTP", "\(request.httpMethod ?? "GET") \(url.absoluteString.prefix(200))")
+
         let (data, response) = try await URLSession.shared.data(for: request)
-        
+
         // 处理编码
         let encoding = detectEncoding(data: data, response: response, charset: analyzedUrl.charset)
         let body = String(data: data, encoding: encoding) ?? String(data: data, encoding: .utf8) ?? ""
-        
+
         let finalUrl = (response as? HTTPURLResponse)?.url?.absoluteString ?? analyzedUrl.url
-        
+        let cost = Int(Date().timeIntervalSince(startedAt) * 1000)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        AppLogger.info("HTTP", "status=\(status) bytes=\(data.count) chars=\(body.count) 耗时=\(cost)ms")
+
         return (body, finalUrl)
     }
     

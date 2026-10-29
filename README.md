@@ -88,7 +88,33 @@
 | 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 1.1.1 修复：搜索闪退
+## 5. 1.1.2 更新：日志版 + 精简入口 + 版本化产物
+
+### 1) 闪退日志（重点）
+
+装上新版本后如果仍然闪退，按下面步骤取日志发我即可定位：
+
+1. 闪退后重新打开 App（不要先杀进程）
+2. 设置 → 诊断 → **导出运行日志** → 存到「文件」或直接发微信/AirDrop
+3. 崩溃当次的记录在 `crash-*.log` 里，运行轨迹在 `app.log` 里
+
+日志内容包含：App 版本、系统版本、崩溃类型（NSException / 信号）、调用栈、崩溃前 200 条运行日志（搜索关键词、每个书源的 URL / HTTP 状态 / 响应长度 / 耗时 / 解析条数 / 失败原因）。
+
+实现：`Core/Logging/AppLogger.swift`（滚动日志，单文件 2MB 保留 3 份）+ `Core/Logging/CrashReporter.swift`（`NSSetUncaughtExceptionHandler` + `SIGABRT/SIGSEGV/SIGBUS/SIGILL/SIGFPE`）。
+
+### 2) 移除「发现」和「RSS 订阅」
+
+- 首页 Tab 从 4 个减少为 2 个：书架 / 我的
+- 删除 `Features/Discovery/DiscoveryView.swift`、`Features/RSS/RSSSubscriptionView.swift`、`RssSourceEditView.swift`、`RssFavoritesView.swift`，以及旧的 `Legado/ContentView.swift`
+- RSS 数据表与 `legado://import/rssSource` 深链保留（避免旧数据异常），但没有界面入口
+
+### 3) 产物命名与版本同步
+
+- Release 产物：`Legado-1.1.2.ipa`（文件名以版本号结尾）
+- Artifact：`Legado-iOS-IPA-1.1.2`、`Legado-iOS-App-1.1.2`、`Legado-xcresult-1.1.2`
+- 打包时用 tag 名覆盖 `CFBundleShortVersionString`，`CFBundleVersion` 用 CI 构建号，**IPA 内版本与 Release 标签一致**
+
+## 5.1 1.1.1 修复：搜索闪退
 
 **现象**：订阅一批书源后，一搜索就闪退。
 
@@ -101,7 +127,7 @@
 - 结果改为边搜边显示；单个源失败不再中断整体搜索，失败原因会带上源名显示出来
 - 顺带修掉 `WebBook` 里两处 `body.data(using: .utf8)!` 强解包
 
-## 5.1 1.1 更新：本地格式 + 排版精度
+## 5.2 1.1 更新：本地格式 + 排版精度
 
 ### 本地书籍格式
 

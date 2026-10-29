@@ -36,6 +36,7 @@ jobs:
           cp tools/typecheck/Package.template.swift /tmp/engine/Package.swift
           cp Core/RuleEngine/RuleSplitter.swift /tmp/engine/Sources/Engine/
           cp Core/Parser/LocalBookParser.swift /tmp/engine/Sources/Engine/
+          cp Core/Logging/AppLogger.swift /tmp/engine/Sources/Engine/
           cp tools/typecheck/stubs/LocalBookStubs.swift /tmp/engine/Sources/Engine/
           cp Core/RuleEngine/TemplateEngine.swift /tmp/engine/Sources/Engine/
           cp tools/typecheck/stubs/PlatformStubs.swift /tmp/engine/Sources/Engine/

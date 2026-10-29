@@ -152,9 +152,11 @@ final class AppLogger {
     }
 
     private func rotateIfNeeded() {
-        guard let handle, let size = try? handle.seekToEnd(), size > maxFileSize else { return }
+        guard let currentHandle = handle,
+              let size = try? currentHandle.seekToEnd(),
+              size > maxFileSize else { return }
 
-        handle?.closeFile()
+        currentHandle.closeFile()
         handle = nil
 
         let directory = Self.directory

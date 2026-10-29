@@ -246,7 +246,7 @@
 		1A1000000000008D /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
 		1A10000000000090 /* LocalBookParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocalBookParser.swift"; sourceTree = "<group>"; };
 		1A10000000000091 /* LocalBookBinaryFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocalBookBinaryFormats.swift"; sourceTree = "<group>"; };
-		1A10000000000092 /* PageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Reader/PageViews/PageTextView.swift"; sourceTree = "<group>"; };
+		1A10000000000092 /* PageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PageViews/PageTextView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */

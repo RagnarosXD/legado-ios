@@ -166,9 +166,12 @@ jobs:
   release:
     name: Create Release
     needs: build-and-test
-    runs-on: macos-14
+    # 只是下载产物 + 建 Release，用 ubuntu 更快也更省 macOS 额度
+    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    
+    permissions:
+      contents: write
+
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -180,7 +183,7 @@ jobs:
         path: release/
     
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: release/Legado-unsigned.ipa
         generate_release_notes: true

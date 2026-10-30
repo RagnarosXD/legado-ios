@@ -94,7 +94,8 @@ final class BookshelfViewModel: ObservableObject {
         var changed = 0
 
         for book in books {
-            let cover = book.coverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let rawCover = book.coverUrl else { continue }
+            let cover = rawCover.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cover.isEmpty,
                   !cover.hasPrefix("http"),
                   !cover.hasPrefix("data:") else { continue }

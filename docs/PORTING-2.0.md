@@ -42,3 +42,27 @@
 
 - 重构期间保持 `1.3.x` 递增，**P1~P4 全部完成且验收通过后**升级到 `2.0`。
 - 每个 P 阶段完成打一次 tag，便于回滚对比。
+
+## 五、P1 第二批（1.3.6）已完成
+
+基于 `AnalyzeRule.kt` / `AnalyzeByJSoup.kt` / `BookList.kt` / `BookChapterList.kt` / `BookInfo.kt` 精读结果：
+
+| # | Android 行为 | 位置 | iOS 改动 |
+| --- | --- | --- | --- |
+| 1 | `getSearchRule()/getTocRule()/getContentRule()/getBookInfoRule()` 永不为 null，缺失返回空对象 | BookSource.kt:122-155 | `WebBook` 4 处 `guard let … else throw` 改为 `?? BookSource.XxxRule()`；规则结构体字段补 `= nil` 默认值 |
+| 2 | 列表项只要求 `name` 非空（`bookUrl` 可空） | BookList.kt:187,222 | `parseBookList` 保留条件从 `name && bookUrl` 改为仅 `name` |
+| 3 | 章节 `chapterUrl` 为空时回落 `baseUrl`；仅 `title` 为空才丢弃 | BookChapterList.kt:262-277 | 首屏与 nextToc 两处改为「title 空跳过；链接空 → redirectUrl」；仅过滤 `javascript:`/`about:`/`#` |
+| 4 | `@html` = 删除 script/style 后的 **outerHtml** | AnalyzeByJSoup.kt:255-262 | `CSSParser` 拆出 `html`（outerHtml+stripScripts）与 `innerhtml`（innerHtml） |
+| 5 | BookInfo 的书名/作者仅在原值为空或 `canReName` 为真时覆盖 | BookInfo.kt:68-81 | 加 `canRename` 判断；`tocUrl` 解析为空回落详情页地址 |
+| 6 | 规则结构缺字段：`TocRule.isVolume/formatJs/preUpdateJs`、`ContentRule.subContent/callBackJs`、`BookInfoRule.kind/canReName` | rule/*.kt | 补齐字段（解码兼容，暂未消费的标 TODO） |
+
+### P1 剩余（下一轮）
+
+1. `isUrl=true` 统一语义（空 → baseUrl，非空 → `getAbsoluteURL(redirectUrl)`）
+2. `@put` 抽取时机、`{{n}}`/`@get` 的 `makeUpRule` 参数替换（不是"或"语义）
+3. `AnalyzeByJSoup` 的 `[]` 索引语法族（`[-1]`、`[0:2:1]`、`[!..]`、`[-1:0]` 反转、`tag.div.-1`）
+4. `text.` = 自有文本包含匹配（当前误当 CSS 标签）
+5. `@ownText` / `@textNodes` 的 trim 与去空语义
+6. XPath 元素保持节点身份（当前转 HTML 字符串二次解析）
+7. `AnalyzeUrl.analyzeJs()`（`<js>`/`@js:`/`@result`）与 `{{...}}` 的 JS 表达式语义
+8. `java.*` 桥全量对齐 `JsExtensions.kt`

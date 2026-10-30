@@ -124,10 +124,8 @@ class WebBook {
         }
 
         // 3. 解析搜索结果
-        guard let searchRule = source.getSearchRule() else {
-            AppLogger.error("WebBook", "缺少搜索规则 \(source.bookSourceName)")
-            throw WebBookError.noRule("搜索规则")
-        }
+        // 对齐 Android：规则对象永不为 null，缺失时用空对象
+        let searchRule = source.getSearchRule() ?? BookSource.SearchRule()
 
         let parsed = try parseBookList(
             source: source,
@@ -154,9 +152,7 @@ class WebBook {
         source: BookSource,
         book: Book
     ) async throws {
-        guard let infoRule = source.getBookInfoRule() else {
-            throw WebBookError.noRule("书籍信息规则")
-        }
+        let infoRule = source.getBookInfoRule() ?? BookSource.BookInfoRule()
         
         // 1. 请求详情页
         let analyzedUrl = AnalyzeUrl.analyze(
@@ -195,13 +191,20 @@ class WebBook {
         }
 
         // 3. 填充书籍信息
+        // 对齐 Android BookInfo：书名/作者仅在原值为空，或规则声明 canReName 时覆盖
+        let canRename: Bool = {
+            guard let rule = infoRule.canReName, !rule.isEmpty else { return false }
+            let value = ruleEngine.getString(ruleStr: rule, elementContext: elementCtx, baseUrl: redirectUrl)
+            return value == "true" || value == "1"
+        }()
+
         if let name = infoRule.name {
             let parsed = ruleEngine.getString(ruleStr: name, elementContext: elementCtx, baseUrl: redirectUrl)
-            if !parsed.isEmpty { book.name = parsed }
+            if !parsed.isEmpty, canRename || book.name.isEmpty { book.name = parsed }
         }
         if let author = infoRule.author {
             let parsed = ruleEngine.getString(ruleStr: author, elementContext: elementCtx, baseUrl: redirectUrl)
-            if !parsed.isEmpty { book.author = parsed }
+            if !parsed.isEmpty, canRename || book.author.isEmpty || book.author == "未知" { book.author = parsed }
         }
         if let intro = infoRule.intro {
             let parsed = ruleEngine.getString(ruleStr: intro, elementContext: elementCtx, baseUrl: redirectUrl)
@@ -213,7 +216,8 @@ class WebBook {
         }
         if let tocUrl = infoRule.tocUrl {
             let parsed = ruleEngine.getString(ruleStr: tocUrl, elementContext: elementCtx, baseUrl: redirectUrl)
-            if !parsed.isEmpty { book.tocUrl = parsed }
+            // 对齐 Android BookInfo：tocUrl 解析为空时回落详情页地址
+            book.tocUrl = parsed.isEmpty ? redirectUrl : parsed
         }
         if let lastChapter = infoRule.lastChapter {
             let parsed = ruleEngine.getString(ruleStr: lastChapter, elementContext: elementCtx, baseUrl: redirectUrl)
@@ -228,9 +232,7 @@ class WebBook {
         source: BookSource,
         book: Book
     ) async throws -> [WebChapter] {
-        guard let tocRule = source.getTocRule() else {
-            throw WebBookError.noRule("目录规则")
-        }
+        let tocRule = source.getTocRule() ?? BookSource.TocRule()
         
         let tocUrl = book.tocUrl.isEmpty ? book.bookUrl : book.tocUrl
         
@@ -288,15 +290,18 @@ class WebBook {
                 chapter.isVip = vipStr == "true" || vipStr == "1"
             }
 
-            guard !title.isEmpty, isValidChapterLink(link) else {
-                if !title.isEmpty {
-                    AppLogger.warn("WebBook", "跳过无效章节 \(source.bookSourceName) \(title) url=\(link.prefix(80))")
-                }
+            // 对齐 Android BookChapterList：只要求标题非空；链接为空时回落 baseUrl
+            guard !title.isEmpty else { continue }
+
+            let trimmedLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
+            let loweredLink = trimmedLink.lowercased()
+            if loweredLink.hasPrefix("javascript:") || loweredLink.hasPrefix("about:") || trimmedLink.hasPrefix("#") {
+                AppLogger.warn("WebBook", "跳过脚本章节 \(source.bookSourceName) \(title) url=\(trimmedLink.prefix(80))")
                 continue
             }
 
             chapter.title = title
-            chapter.url = link
+            chapter.url = trimmedLink.isEmpty ? redirectUrl : trimmedLink
             chapters.append(chapter)
         }
         
@@ -351,10 +356,14 @@ class WebBook {
                         link = ruleEngine.getString(ruleStr: "a@href", elementContext: elementCtx, baseUrl: nextRedirectUrl)
                     }
 
-                    guard !title.isEmpty, isValidChapterLink(link) else { continue }
+                    guard !title.isEmpty else { continue }
+
+                    let trimmedLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let loweredLink = trimmedLink.lowercased()
+                    if loweredLink.hasPrefix("javascript:") || loweredLink.hasPrefix("about:") || trimmedLink.hasPrefix("#") { continue }
 
                     chapter.title = title
-                    chapter.url = link
+                    chapter.url = trimmedLink.isEmpty ? nextRedirectUrl : trimmedLink
                     chapters.append(chapter)
                 }
                 
@@ -375,9 +384,7 @@ class WebBook {
         book: Book,
         chapter: BookChapter
     ) async throws -> String {
-        guard let contentRule = source.getContentRule() else {
-            throw WebBookError.noRule("正文规则")
-        }
+        let contentRule = source.getContentRule() ?? BookSource.ContentRule()
         
         guard let ruleStr = contentRule.content, !ruleStr.isEmpty else {
             throw WebBookError.noRule("正文规则")
@@ -508,18 +515,6 @@ class WebBook {
         return value
     }
 
-    /// 目录里常见的无效链接：javascript:、锚点、about:blank
-    private static func isValidChapterLink(_ raw: String) -> Bool {
-        let link = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !link.isEmpty else { return false }
-
-        let lowered = link.lowercased()
-        if lowered.hasPrefix("javascript:") || lowered.hasPrefix("#") || lowered.hasPrefix("about:") {
-            return false
-        }
-        return true
-    }
-
     /// 相对地址补全（封面、详情页地址）
     static func normalizeURL(_ value: String, base: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -594,7 +589,8 @@ class WebBook {
             book.wordCount = value(wordCountRule, "wordCount")
 
             // 过滤无效结果
-            if !book.name.isEmpty && !book.bookUrl.isEmpty {
+            // 对齐 Android BookList：仅要求书名非空（bookUrl 可空，后续用 baseUrl 兜底）
+            if !book.name.isEmpty {
                 books.append(book)
             }
         }

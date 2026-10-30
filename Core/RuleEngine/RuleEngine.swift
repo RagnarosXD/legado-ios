@@ -759,7 +759,11 @@ class CSSParser: RuleExecutor {
         case "textnodes":
             return element.textNodes().map { $0.text() }.joined(separator: "\n")
 
-        case "html", "innerhtml":
+        case "html":
+            // 对齐 Android AnalyzeByJSoup：@html = 删除 script/style 后的 outerHtml
+            return CSSParser.stripScripts(try element.outerHtml())
+
+        case "innerhtml":
             return try element.html()
 
         case "outerhtml", "all":
@@ -783,6 +787,14 @@ class CSSParser: RuleExecutor {
             }
             return CSSParser.absoluteIfNeeded(raw, attr: attr.lowercased(), base: base)
         }
+    }
+
+    /// 去掉 script/style（Android 的 @html 会先剔除这两类节点）
+    static func stripScripts(_ html: String) -> String {
+        var text = html
+        text = text.replacingOccurrences(of: "(?is)<script[^>]*>.*?</script>", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?is)<style[^>]*>.*?</style>", with: "", options: .regularExpression)
+        return text
     }
 
     /// 只对「看起来是链接」的属性做相对路径补全，避免把正文文本拼成 URL

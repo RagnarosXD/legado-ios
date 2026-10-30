@@ -122,68 +122,77 @@ extension BookSource {
 extension BookSource {
     /// 发现规则
     struct ExploreRule: Codable {
-        var exploreList: String?
-        var name: String?
-        var author: String?
-        var intro: String?
-        var bookUrl: String?
-        var coverUrl: String?
-        var lastChapter: String?
+        var exploreList: String? = nil
+        var name: String? = nil
+        var author: String? = nil
+        var intro: String? = nil
+        var bookUrl: String? = nil
+        var coverUrl: String? = nil
+        var lastChapter: String? = nil
+        var kind: String? = nil
+        var wordCount: String? = nil
     }
-    
+
     /// 搜索规则
     struct SearchRule: Codable {
-        var checkKeyWord: String?
-        var bookList: String?
-        var name: String?
-        var author: String?
-        var intro: String?
-        var bookUrl: String?
-        var coverUrl: String?
-        var lastChapter: String?
-        var wordCount: String?
-        var kind: String?
+        var checkKeyWord: String? = nil
+        var bookList: String? = nil
+        var name: String? = nil
+        var author: String? = nil
+        var intro: String? = nil
+        var bookUrl: String? = nil
+        var coverUrl: String? = nil
+        var lastChapter: String? = nil
+        var wordCount: String? = nil
+        var kind: String? = nil
     }
-    
+
     /// 书籍信息规则
     struct BookInfoRule: Codable {
-        var initRule: String?
-        var name: String?
-        var author: String?
-        var intro: String?
-        var coverUrl: String?
-        var tocUrl: String?
-        var lastChapter: String?
-        var wordCount: String?
-        var downloadUrls: String?
-        
+        var initRule: String? = nil
+        var name: String? = nil
+        var author: String? = nil
+        var intro: String? = nil
+        var coverUrl: String? = nil
+        var tocUrl: String? = nil
+        var lastChapter: String? = nil
+        var wordCount: String? = nil
+        var downloadUrls: String? = nil
+        var kind: String? = nil
+        var canReName: String? = nil
+
         enum CodingKeys: String, CodingKey {
             case initRule = "init"
-            case name, author, intro, coverUrl, tocUrl, lastChapter, wordCount, downloadUrls
+            case name, author, intro, coverUrl, tocUrl, lastChapter, wordCount, downloadUrls, kind, canReName
         }
     }
-    
+
     /// 目录规则
     struct TocRule: Codable {
-        var chapterList: String?
-        var chapterName: String?
-        var chapterUrl: String?
-        var isVip: String?
-        var isPay: String?
-        var updateTime: String?
-        var nextTocUrl: String?
+        var chapterList: String? = nil
+        var chapterName: String? = nil
+        var chapterUrl: String? = nil
+        var isVip: String? = nil
+        var isPay: String? = nil
+        var updateTime: String? = nil
+        var nextTocUrl: String? = nil
+        var isVolume: String? = nil
+        var formatJs: String? = nil
+        var preUpdateJs: String? = nil
     }
-    
+
     /// 正文规则
     struct ContentRule: Codable {
-        var content: String?
-        var title: String?
-        var nextContentUrl: String?
-        var webJs: String?
-        var sourceRegex: String?
-        var replaceRegex: String?
-        var imageStyle: String?
-        var payAction: String?
+        var content: String? = nil
+        var subContent: String? = nil
+        var title: String? = nil
+        var nextContentUrl: String? = nil
+        var webJs: String? = nil
+        var sourceRegex: String? = nil
+        var replaceRegex: String? = nil
+        var imageStyle: String? = nil
+        var payAction: String? = nil
+        var callBackJs: String? = nil
     }
     
     /// 段评规则

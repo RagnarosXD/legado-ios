@@ -68,7 +68,7 @@ enum BookSourceResolver {
         book.durChapterIndex = 0
         book.durChapterTitle = ""
         book.durChapterPos = 0
-        book.durChapterTime = Date()
+        book.durChapterTime = Int64(Date().timeIntervalSince1970 * 1000)
         try? context.save()
     }
 }

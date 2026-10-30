@@ -141,7 +141,11 @@ final class SearchSourceCache {
                 let right = rhs.value.map(\.cachedAt).max() ?? .distantPast
                 return left > right
             }
-            storage = Dictionary(ordered.prefix(maxBooks), uniquingKeysWith: { first, _ in first })
+            var kept: [String: [CachedSourceHit]] = [:]
+            for item in ordered.prefix(maxBooks) {
+                kept[item.key] = item.value
+            }
+            storage = kept
         }
     }
 }

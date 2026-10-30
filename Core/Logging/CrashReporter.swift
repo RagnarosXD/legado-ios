@@ -26,10 +26,11 @@ enum CrashReporter {
         let previousLaunchFinished = UserDefaults.standard.bool(forKey: launchFlagKey)
         if previousLaunchFinished == false {
             AppLogger.warn("Crash", "检测到上次未正常退出，日志目录：\(AppLogger.directory.lastPathComponent)")
-            // 把上次的崩溃报告（含调用栈）合并进 app.log，这样用户只导一份日志就够
-            appendLatestCrashReportToLog()
         }
         UserDefaults.standard.set(false, forKey: launchFlagKey)
+
+        // 不依赖「是否正常退出」判断：只要磁盘上有还没导入过的崩溃报告就合并进主日志
+        importPendingCrashReports()
 
         // ObjC 异常
         NSSetUncaughtExceptionHandler { exception in
@@ -99,9 +100,13 @@ enum CrashReporter {
         UserDefaults.standard.set(true, forKey: launchFlagKey)
     }
 
-    // MARK: - 把上次崩溃报告写进主日志
+    // MARK: - 把崩溃报告写进主日志
 
-    private static func appendLatestCrashReportToLog() {
+    private static let lastImportedCrashKey = "legado.lastImportedCrash"
+
+    /// 之前的实现只在「上次启动未满 3 秒就退出」时才合并崩溃报告，
+    /// 而崩溃通常发生在启动几秒之后，导致崩了也永远看不到调用栈。改为按文件去重。
+    private static func importPendingCrashReports() {
         let directory = AppLogger.directory
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory,
@@ -113,17 +118,21 @@ enum CrashReporter {
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
 
         guard let latest = crashFiles.first else {
-            AppLogger.warn("Crash", "没有崩溃报告文件：可能是被系统终止、OOM 或信号处理未触发")
+            AppLogger.warn("Crash", "没有崩溃报告文件（可能是 watchdog / OOM 直接杀进程，未触发信号）")
             return
         }
+
+        let lastImported = UserDefaults.standard.string(forKey: lastImportedCrashKey)
+        guard latest.lastPathComponent != lastImported else { return }
+        UserDefaults.standard.set(latest.lastPathComponent, forKey: lastImportedCrashKey)
 
         guard let text = try? String(contentsOf: latest, encoding: .utf8) else {
             AppLogger.warn("Crash", "崩溃报告读取失败：\(latest.lastPathComponent)")
             return
         }
 
-        AppLogger.error("Crash", "===== 上次崩溃报告 \(latest.lastPathComponent) =====")
-        for line in text.components(separatedBy: "\n").prefix(80) where !line.isEmpty {
+        AppLogger.error("Crash", "===== 崩溃报告 \(latest.lastPathComponent) =====")
+        for line in text.components(separatedBy: "\n").prefix(120) where !line.isEmpty {
             AppLogger.error("Crash", line)
         }
         AppLogger.error("Crash", "===== 崩溃报告结束 =====")

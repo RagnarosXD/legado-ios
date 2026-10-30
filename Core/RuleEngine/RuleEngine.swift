@@ -924,7 +924,8 @@ class JavaScriptParser: RuleExecutor {
     var kind: RuleKind { .js }
     
     func canExecute(_ rule: String) -> Bool {
-        return rule.contains("{{js") || rule.contains("<js>")
+        let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("@js:") || rule.contains("{{js") || rule.contains("<js>")
     }
     
     func execute(_ rule: String, context: ExecutionContext) throws -> RuleResult {
@@ -948,6 +949,12 @@ class JavaScriptParser: RuleExecutor {
     }
     
     private func extractJS(_ rule: String) -> String {
+        // Legado 的 @js: 前缀：后面整段就是 JS 代码，不能把 "@js:" 一起丢给 JSC
+        let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("@js:") {
+            return String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
         let patterns = [
             #"{{js(.*?)}}"#,
             #"<js>(.*?)</js>"#

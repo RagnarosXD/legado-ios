@@ -43,6 +43,7 @@ class AnalyzeUrl {
         source: BookSource? = nil
     ) -> AnalyzedUrl {
         var result = AnalyzedUrl(url: "")
+        AppLogger.debug("AnalyzeUrl", "analyze 开始 len=\(ruleUrl.count) prefix=\(ruleUrl.prefix(80))")
         let templateContext = buildTemplateContext(key: key, page: page, source: source)
         
         // 1. 分离 URL 和配置 JSON
@@ -60,7 +61,12 @@ class AnalyzeUrl {
         }
         
         // 2. 变量替换
+        let renderStart = Date()
         urlPart = replaceVariables(urlPart, context: templateContext)
+        let renderCost = Int(Date().timeIntervalSince(renderStart) * 1000)
+        if renderCost > 50 || urlPart.count > 2000 {
+            AppLogger.debug("AnalyzeUrl", "变量替换完成 耗时=\(renderCost)ms outLen=\(urlPart.count)")
+        }
         
         // 3. 解析 HTTP 方法
         if let method = configJson?["method"] as? String {

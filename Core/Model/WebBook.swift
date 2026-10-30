@@ -59,22 +59,41 @@ class WebBook {
         var resolvedUrl = searchUrl
         let trimmedUrl = searchUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedUrl.hasPrefix("@js:") || trimmedUrl.hasPrefix("<js") || trimmedUrl.hasPrefix("{{") {
+            // 多行 JS 脚本在搜索 URL 里执行会阻塞主线程（严重时被 watchdog 杀掉），超长直接跳过
+            let scriptLimit = 4000
+            guard trimmedUrl.count <= scriptLimit else {
+                AppLogger.warn("WebBook", "searchUrl 规则过长跳过 \(source.bookSourceName) len=\(trimmedUrl.count)")
+                throw WebBookError.noSearchUrl
+            }
+
+            // 生成 URL 的脚本里如果还在同步抓网络（java.ajax），很容易把主线程卡死，直接跳过
+            if trimmedUrl.contains("java.ajax") {
+                AppLogger.warn("WebBook", "searchUrl 规则含 java.ajax，跳过以避免主线程阻塞 \(source.bookSourceName)")
+                throw WebBookError.noSearchUrl
+            }
+
             let context = ElementContext(element: "", baseUrl: source.bookSourceUrl, source: source)
             context.variables["key"] = key
             context.variables["page"] = String(page)
-            if let evaluated = try? ruleEngine.getString(
+
+            let startedAt = Date()
+            let evaluated = (try? ruleEngine.getString(
                 ruleStr: trimmedUrl,
                 elementContext: context,
                 baseUrl: source.bookSourceUrl
-            ) {
-                let candidate = evaluated.trimmingCharacters(in: .whitespacesAndNewlines)
-                if candidate.hasPrefix("http") {
-                    resolvedUrl = candidate
-                    AppLogger.info("WebBook", "搜索URL 由规则生成：\(candidate.prefix(180))")
-                } else {
-                    AppLogger.warn("WebBook", "搜索URL 规则未生成合法地址：\(candidate.prefix(120))")
-                }
+            )) ?? ""
+            let cost = Int(Date().timeIntervalSince(startedAt) * 1000)
+            AppLogger.info("WebBook", "searchUrl 规则执行 \(source.bookSourceName) 耗时=\(cost)ms")
+
+            let candidate = evaluated.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard candidate.hasPrefix("http") else {
+                // 绝不把 JS 源码当成 URL 去拼接：之前就是这条路径导致崩溃
+                AppLogger.warn("WebBook", "searchUrl 规则未生成合法地址，跳过 \(source.bookSourceName) 结果=\(candidate.prefix(120))")
+                throw WebBookError.noSearchUrl
             }
+
+            resolvedUrl = candidate
+            AppLogger.info("WebBook", "搜索URL 由规则生成：\(candidate.prefix(180))")
         }
 
         // 1. 构建搜索 URL

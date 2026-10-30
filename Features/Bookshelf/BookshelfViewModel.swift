@@ -55,6 +55,7 @@ final class BookshelfViewModel: ObservableObject {
             }
             books = firstPage
             hasMore = firstPage.count == pageSize
+            normalizeCoverURLs()
         } catch {
             errorMessage = "加载失败：\(error.localizedDescription)"
             print("❌ loadBooks 失败: \(error)")
@@ -86,6 +87,32 @@ final class BookshelfViewModel: ObservableObject {
         isLoading = false
     }
     
+    /// 旧数据里的封面可能是相对路径（`/img/1.jpg`），书名页因此显示占位图。
+    /// 这里按书源地址补全成绝对地址并保存一次。
+    private func normalizeCoverURLs() {
+        let context = CoreDataStack.shared.viewContext
+        var changed = 0
+
+        for book in books {
+            let cover = book.coverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cover.isEmpty,
+                  !cover.hasPrefix("http"),
+                  !cover.hasPrefix("data:") else { continue }
+
+            guard let source = BookSourceResolver.resolve(for: book, in: context),
+                  let base = URL(string: source.bookSourceUrl),
+                  let absolute = URL(string: cover, relativeTo: base)?.absoluteString else { continue }
+
+            book.coverUrl = absolute
+            changed += 1
+        }
+
+        if changed > 0 {
+            try? context.save()
+            AppLogger.info("Bookshelf", "补全 \(changed) 本书的封面地址")
+        }
+    }
+
     private func fetchBooks(page: Int, size: Int) async throws -> [Book] {
         let context = CoreDataStack.shared.viewContext
 

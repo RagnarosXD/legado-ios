@@ -276,6 +276,8 @@ struct ReaderView: View {
         }
         .navigationBarHidden(true)
         .statusBar(hidden: !showUI)
+        // 阅读页全屏：隐藏底部 TabBar（书架/我的），退出阅读器自动恢复
+        .toolbar(.hidden, for: .tabBar)
         // 沉浸模式：隐藏 Home 指示条，与 Android 全屏阅读一致
         .persistentSystemOverlays(showUI ? .automatic : .hidden)
     }

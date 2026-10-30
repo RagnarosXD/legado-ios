@@ -147,8 +147,23 @@ class ReaderViewModel: ObservableObject {
     }
 
     /// 当前排版配置（分页与渲染共用）
+    /// 真实安全区（灵动岛 / 刘海 / Home 指示条）
+    /// SwiftUI 视图一旦 ignoresSafeArea，GeometryReader 里的 safeAreaInsets 会变成 0，
+    /// 所以这里直接读 window，保证灵动岛区域一定被避开。
+    static var windowSafeArea: UIEdgeInsets {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        return scene?.keyWindow?.safeAreaInsets ?? .zero
+    }
+
     func makePageConfig(containerSize: CGSize, extraTop: CGFloat = 0, extraBottom: CGFloat = 0) -> PageConfig {
-        PageConfig.from(
+        // 灵动岛机型顶部安全区约 59pt、Home 条约 34pt，取两者较大值
+        let safeArea = Self.windowSafeArea
+        let topInset = max(extraTop, safeArea.top)
+        let bottomInset = max(extraBottom, safeArea.bottom)
+
+        return PageConfig.from(
             fontSize: fontSize,
             lineSpacing: lineSpacing,
             paragraphSpacing: paragraphSpacing,
@@ -157,9 +172,9 @@ class ReaderViewModel: ObservableObject {
             lineHeightMultiple: lineHeightMultiple,
             justified: textJustified,
             padding: UIEdgeInsets(
-                top: pagePadding.top + extraTop,
+                top: pagePadding.top + topInset,
                 left: pagePadding.leading,
-                bottom: pagePadding.bottom + extraBottom,
+                bottom: pagePadding.bottom + bottomInset,
                 right: pagePadding.trailing
             ),
             containerSize: containerSize,
@@ -520,7 +535,9 @@ class ReaderViewModel: ObservableObject {
             totalPages = 1
         } else {
             chapterImages = []
-            chapterContent = applyReplaceRulesIfNeeded(raw, chapter: chapter)
+            // 已缓存的历史正文可能带 HTML（旧版本没净化），渲染前统一清一次
+            let cleaned = WebBook.sanitizeHTML(raw)
+            chapterContent = applyReplaceRulesIfNeeded(cleaned, chapter: chapter)
         }
     }
 

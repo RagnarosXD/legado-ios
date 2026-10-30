@@ -430,8 +430,32 @@ class WebBook {
         if let replaceRegex = contentRule.replaceRegex, !replaceRegex.isEmpty {
             content = applyReplaceRegex(content, regex: replaceRegex)
         }
-        
+
+        // 5. 去掉残留的 HTML 标签：有些源正文规则返回 @html，会带 <p>、<br> 甚至未闭合标签
+        content = sanitizeHTML(content)
+
         return content
+    }
+
+    /// 正文里如果混进了 HTML（`@html` 规则、未闭合标签、HTML 实体），统一转成纯文本并保留段落
+    static func sanitizeHTML(_ text: String) -> String {
+        guard text.contains("<") else { return text }
+        let hasTag = text.range(of: "<\\s*/?\\s*[a-zA-Z][^>]*>", options: .regularExpression) != nil
+        guard hasTag else { return text }
+
+        var plain = HTMLTextExtractor.plainText(from: text)
+
+        // 兜底：清掉漏网的孤立标签，如被拆成单独一行的 <P>/<BR/>
+        plain = plain.replacingOccurrences(of: "<[^>]{1,24}>", with: "", options: .regularExpression)
+        plain = plain.replacingOccurrences(of: "&nbsp;", with: " ")
+        plain = plain.replacingOccurrences(of: "&amp;", with: "&")
+        plain = plain.replacingOccurrences(of: "&lt;", with: "<")
+        plain = plain.replacingOccurrences(of: "&gt;", with: ">")
+
+        // 合并多余的连续空行
+        plain = plain.replacingOccurrences(of: "\n[ \t]*\n[ \t]*\n+", with: "\n\n", options: .regularExpression)
+
+        return plain.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     /// 清洗解析结果里的 URL：去掉规则残留的 `##替换` 片段，避免把 `##` 编码进请求地址

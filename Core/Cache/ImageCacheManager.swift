@@ -81,7 +81,8 @@ class ImageCacheManager: ObservableObject {
     // MARK: - 下载图片
     
     private func downloadImage(from url: String, completion: @escaping (UIImage?) -> Void) {
-        guard let imageURL = URL(string: url) else {
+        guard let imageURL = Self.makeURL(from: url) else {
+            AppLogger.warn("Cover", "封面地址无法解析：\(url.prefix(120))")
             completion(nil)
             return
         }
@@ -112,6 +113,19 @@ class ImageCacheManager: ObservableObject {
         checkDiskSize()
     }
     
+    /// 兼容未编码的中文/空格文件名（很多站点封面是中文路径）
+    private static func makeURL(from string: String) -> URL? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let url = URL(string: trimmed), url.scheme != nil {
+            return url
+        }
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return URL(string: encoded)
+    }
+
     private func cachePath(for url: String) -> String {
         let fileName = url.md5()
         return cacheDirectory.appendingPathComponent(fileName).path

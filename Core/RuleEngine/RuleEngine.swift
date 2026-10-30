@@ -558,14 +558,18 @@ class RuleEngine {
             let result = try executeSingle(rule: ruleStr, context: context)
             if joinAll { return result.text }
 
+            let value: String
             switch result {
-            case .string(let value):
-                return value
+            case .string(let text):
+                value = text
             case .list(let values):
-                return values.first(where: { !$0.isEmpty }) ?? ""
+                value = values.first(where: { !$0.isEmpty }) ?? ""
             case .none:
-                return ""
+                value = ""
             }
+
+            // 对齐 Android getString 的默认 unescape=true（正文走 getStringList，不做此处理）
+            return value.contains("&") ? HTMLTextExtractor.decodeEntities(value) : value
         } catch {
             print("getString 错误 [\(ruleStr)]: \(error)")
             return ""

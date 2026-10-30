@@ -82,10 +82,18 @@ class RuleSplitter {
             return (item.kind, content)
         }
 
-        if trimmed.hasPrefix("//") {
+        // 对齐 Android AnalyzeRule.SourceRule：
+        // "@@" 是转义前缀，后续内容按默认（CSS/默认选择器）解析
+        if trimmed.hasPrefix("@@") {
+            return (.css, String(trimmed.dropFirst(2)))
+        }
+
+        // 以 "/" 开头一律视为 XPath（Android 里 /html/body/... 也走 XPath，不只是 //）
+        if trimmed.hasPrefix("/") {
             return (.xpath, trimmed)
         }
-        if trimmed.hasPrefix("$.") {
+        // 以 "$." 或 "$[" 开头都视为 JSONPath
+        if trimmed.hasPrefix("$.") || trimmed.hasPrefix("$[") {
             return (.jsonPath, trimmed)
         }
         if lowercased.hasPrefix("regex:") || lowercased.contains("{{regex") {

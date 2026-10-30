@@ -113,33 +113,39 @@ class SourceViewModel: ObservableObject {
     }
     
     func deleteSource(_ source: BookSource) {
+        deleteSources(ids: [source.sourceId])
+    }
+
+    /// 批量删除：先从内存数组摘掉再保存。
+    /// 之前是「只 delete + 异步刷新」，SwiftUI 下一帧仍会为已删除对象求 `sourceId`，
+    /// 触发 invalidated object 访问，单个/批量删除都会闪退。
+    func deleteSources(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+
         let context = CoreDataStack.shared.viewContext
-        context.delete(source)
+        let targets = sources.filter { ids.contains($0.sourceId) }
+        for source in targets {
+            context.delete(source)
+        }
+
+        // 关键：同步移除，界面不会再渲染到已失效对象
+        sources.removeAll { ids.contains($0.sourceId) }
+
         do {
             try CoreDataStack.shared.save()
+            AppLogger.info("Source", "删除 \(targets.count) 个书源，剩余 \(sources.count)")
         } catch {
             context.rollback()
             errorMessage = "删除失败：\(error.localizedDescription)"
-        }
-        Task {
-            await loadSources()
+            Task { await loadSources() }
         }
     }
-    
+
     func deleteSources(at indexSet: IndexSet) {
-        let context = CoreDataStack.shared.viewContext
-        for index in indexSet {
-            context.delete(sources[index])
-        }
-        do {
-            try CoreDataStack.shared.save()
-        } catch {
-            context.rollback()
-            errorMessage = "删除失败：\(error.localizedDescription)"
-        }
-        Task {
-            await loadSources()
-        }
+        let ids = Set(indexSet.compactMap { index in
+            sources.indices.contains(index) ? sources[index].sourceId : nil
+        })
+        deleteSources(ids: ids)
     }
     
     func importFromURL(_ urlString: String) async -> Int {

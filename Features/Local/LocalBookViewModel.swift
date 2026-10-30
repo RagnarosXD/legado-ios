@@ -142,7 +142,10 @@ class LocalBookViewModel: ObservableObject {
             try? FileManager.default.removeItem(at: chapterDir)
         }
 
+        let bookId = book.bookId
         CoreDataStack.shared.viewContext.delete(book)
+        // 同步移除，避免列表继续渲染已失效对象
+        localBooks.removeAll { $0.bookId == bookId }
         try? CoreDataStack.shared.save()
 
         Task {

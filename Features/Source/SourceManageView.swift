@@ -296,11 +296,8 @@ struct SourceManageView: View {
     }
     
     private func batchDelete() {
-        for id in selectedSources {
-            if let source = viewModel.sources.first(where: { $0.sourceId == id }) {
-                viewModel.deleteSource(source)
-            }
-        }
+        // 一次性删除并保存，避免循环里反复 save / 刷新导致的失效对象访问
+        viewModel.deleteSources(ids: selectedSources)
         selectedSources.removeAll()
     }
 

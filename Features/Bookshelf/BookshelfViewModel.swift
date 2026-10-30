@@ -116,7 +116,10 @@ final class BookshelfViewModel: ObservableObject {
     }
     
     func removeBook(_ book: Book) {
+        let id = book.bookId
         CoreDataStack.shared.viewContext.delete(book)
+        // 同步摘掉，避免 SwiftUI 下一帧为已失效对象求 id / 渲染
+        books.removeAll { $0.bookId == id }
         try? CoreDataStack.shared.save()
     }
     

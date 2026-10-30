@@ -362,7 +362,11 @@ class RuleEngine {
             return try getJsonElements(ruleStr: rule, body: body)
         }
 
-        if isJson {
+        // 规则本身是 JSONPath 时也必须按 JSON 解析：否则会被当成 CSS 选择器丢给 SwiftSoup，
+        // 抛出 "SwiftSoup.Exception 错误 0"（日志里 $.data.chapters[*] 就是这么炸的）
+        let looksLikeJSONPath = rule.hasPrefix("$.") || rule.hasPrefix("$[")
+
+        if isJson || looksLikeJSONPath {
             return try getJsonElements(ruleStr: rule, body: body)
         }
         return try getHtmlElements(ruleStr: rule, body: body, baseUrl: baseUrl)

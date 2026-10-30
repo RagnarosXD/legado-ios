@@ -160,7 +160,7 @@ class WebBook {
         
         // 1. 请求详情页
         let analyzedUrl = AnalyzeUrl.analyze(
-            ruleUrl: book.bookUrl,
+            ruleUrl: sanitizeURL(book.bookUrl),
             baseUrl: source.bookSourceUrl,
             source: source
         )
@@ -236,7 +236,7 @@ class WebBook {
         
         // 1. 请求目录页
         let analyzedUrl = AnalyzeUrl.analyze(
-            ruleUrl: tocUrl,
+            ruleUrl: sanitizeURL(tocUrl),
             baseUrl: source.bookSourceUrl,
             source: source
         )
@@ -353,7 +353,7 @@ class WebBook {
         
         // 1. 请求正文页
         let analyzedUrl = AnalyzeUrl.analyze(
-            ruleUrl: chapter.chapterUrl,
+            ruleUrl: sanitizeURL(chapter.chapterUrl),
             baseUrl: source.bookSourceUrl,
             source: source
         )
@@ -434,6 +434,15 @@ class WebBook {
         return content
     }
     
+    /// 清洗解析结果里的 URL：去掉规则残留的 `##替换` 片段，避免把 `##` 编码进请求地址
+    static func sanitizeURL(_ url: String) -> String {
+        var value = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = value.range(of: "##") {
+            value = String(value[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return value
+    }
+
     /// 相对地址补全（封面、详情页地址）
     static func normalizeURL(_ value: String, base: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

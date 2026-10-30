@@ -31,7 +31,7 @@
 | `ReplaceRule` | `Core/RuleEngine/ReplaceEngine.swift` |
 | `ReadAloudService`（TTS） | `Core/Audio`、`Core/TTS` |
 | WebDAV 备份 | `Core/Sync` |
-| RSS 订阅 | `Features/RSS` |
+| ~~RSS 订阅~~ | 已移除（无界面入口） |
 | 书源/替换规则/备份导入导出 | `Core/Migration/DataMigrationManager.swift` |
 
 ## 2. 书源规则支持情况
@@ -56,22 +56,7 @@
 | 目录/正文翻页 `nextTocUrl` / `nextContentUrl` | ✅ | 带环检测与页数上限 |
 | `loginCheckJs`、`jsLib`、`webJs`、书源级 `variable` 持久化 | ⚠️ 未接入 | 具体见下表 |
 
-## 3. 本次提交修复的问题
-
-之前版本引擎写得很全，但**字段规则没走引擎**，导致真实书源大面积失效。本次逐项修好：
-
-1. **字段规则分派**（最关键）：`RuleEngine.getString` 原来只做「CSS + @attr」，现在统一走 `executeSingle`，`##` 净化、`@js:`、`@css:`、`@xpath:`、`@json:`、`&&`/`||`/`%%`、`@put/@get` 全部生效。
-2. **作用域**：列表项解析出的元素现在能作为根继续求值字段规则（`scopedElement`），而不是每次都拿整篇文档查。
-3. **Legado 默认语法**：新增 `LegadoSelector`，支持 `class.` / `id.` / `tag.` / `text.` / `children` / `@tag.` 级联 / `!index`。
-4. **JSONPath**：新增 `JSONPathEvaluator`，支持通配、递归下降、切片、过滤器、数组根节点。
-5. **XPath 修复**：原来要求 `document` 是字符串，实际传的是 `SwiftSoup.Document`，所有 XPath 书源必抛 `noDocument`；现在从 `htmlString` 取文档，并支持 `@attr`。
-6. **正文段落**：`@text` 改为按块级标签换行（`HTMLTextExtractor`），正文不再被压成一行；正文规则命中多个节点时全部拼接。
-7. **正文兜底**：正文规则为空时不再把章节 URL 当正文返回，改为抛错。
-8. **JSBridge**：补齐 `java.post` / `ajaxAll` / `base64` / `md5` / `encodeURI` / `timeFormat` / `htmlFormat` / `getString(rule)` / `getElements(rule)`；给出 `undefined` 参数也不会崩（JS 包装层做类型兜底）。
-9. **深链导入**：`legado://import/bookSource?json=...` 原来只写入 URL/名称/分组，规则被丢弃 → 导入的书源永远搜不到书；现在完整写入 `searchUrl`、`exploreUrl`、`header`、`ruleSearch`、`ruleExplore`、`ruleBookInfo`、`ruleToc`、`ruleContent`。
-10. **详情页 init 规则**：`ruleBookInfo.init` 现在会在解字段前执行。
-
-## 4. 功能状态
+## 3. 功能状态
 
 | 模块 | 状态 |
 | --- | --- |
@@ -80,279 +65,19 @@
 | 聚合搜索（多源并发） | ✅ |
 | 书籍详情 / 目录 / 正文（含翻页与缓存） | ✅ |
 | 阅读器（CoreText 分页与同源渲染、仿真/覆盖/滑动翻页、自动翻页、主题、书签） | ✅ |
-| 排版精度（字距、首行缩进、行高倍数、段距、两端对齐） | ✅ 1.1 新增 |
-| 本地书籍（TXT / EPUB / PDF / MOBI / AZW3 / HTML / Markdown / CBZ） | ✅ 1.1 起支持；UMD 暂不支持 |
+| 排版精度（字距、首行缩进、行高倍数、段距、两端对齐） | ✅ |
+| 本地书籍（TXT / EPUB / PDF / MOBI / AZW3 / HTML / Markdown / CBZ） | ✅（UMD 暂不支持） |
 | 替换净化规则 | ✅ 引擎可用（正文链路已接入 `replaceRegex`） |
 | TTS 朗读、WebDAV 同步、阅读统计 | ✅ 有实现，未做逐项回归 |
-| RSS 订阅 | ⚠️ 列表与阅读有实现；`legado://import/rssSource` 深链导入仍是占位 |
+| RSS 订阅 / 发现 | ❌ 入口已移除 |
 | 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 1.2.6：封面、正文解析报错、全屏阅读
-
-### 1) http 书源仍被 ATS 拦截
-
-1.1.3 里同时写了 `NSAllowsArbitraryLoads` 和 `NSAllowsArbitraryLoadsInWebContent`。按 Apple 规则，**只要出现后者，前者会被忽略**，等于没开例外，于是日志里大量 `-1022 ATS`。现在只保留 `NSAllowsArbitraryLoads`。
-
-### 2) 搜索结果没有封面
-
-- `@src` 取不到时回退 `data-src` / `data-original` / `data-lazy-src` / `data-echo`（懒加载站点）
-- 非 `src` 属性（`data-*` 等）也做相对地址补全，之前只有 `@src`/`@href` 会拼 baseUrl
-- 搜索结果里的 `coverUrl` / `bookUrl` 统一绝对化（`/img/1.jpg` → `https://站点/img/1.jpg`）
-
-### 3) 阅读报错「SwiftSoup.Exception 错误 0」
-
-这是正文/列表规则里的 CSS 选择器非法，SwiftSoup 抛出英文异常后直接冒到 UI。现在所有 `select` / `parse` 都包了 do/catch：
-
-- 日志记录 `选择器非法 rule=... selector=...`
-- 用户看到的是「无效规则：CSS 选择器不合法：xxx」，能直接判断是这个书源的哪条规则有问题
-
-### 4) 全屏阅读（对齐 Android）
-
-- 正文容器 `ignoresSafeArea()` 铺满整屏，背景延伸到屏幕边缘
-- 隐藏 Home 指示条：`.persistentSystemOverlays(showUI ? .automatic : .hidden)`
-- 分页与渲染的 padding 叠加刘海、手势条高度（`makePageConfig(extraTop:extraBottom:)`），文字不会被遮挡
-- 顶部工具栏显示时避让刘海高度
-
-## 5.1 1.2.5：真正根因——JSContext 注入方式错误
-
-1.2.4 的崩溃报告终于带回了调用栈：
-
-```
-kind: NSException
-detail: name=NSUnknownKeyException
-        reason=[<JSContext 0x...> setValue:forUndefinedKey:]:
-        this class is not key value coding-compliant for the key java.
-
-4  Legado  JSBridge.injectJavaObject(into: JSContext)
-5  Legado  ExecutionContext.makeJSContext(owner:)
-7  Legado  JavaScriptParser.execute
-12 Legado  WebBook.searchBook
-```
-
-**根因**：注入 JS 全局对象时用的是 KVC 的 `jsContext.setValue(obj, forKey: "java")`。`JSContext` 不实现 KVC，调用会抛 `NSUnknownKeyException`，是**必崩**的。所以只要某个书源触发了 JS 规则（`@js:`、`<js>`、`{{js...}}`、以及搜索 URL 用脚本生成），就会在注入阶段炸掉——和 `@js:` 语法、书源类型都无关。
-
-之前几轮没定位到，是因为崩溃发生在「第一次执行 JS 规则」时，而日志异步写盘丢掉了那段，崩溃报告也因合并逻辑缺陷从未出现。
-
-1.2.5 修复：
-
-- 12 处 JSContext 注入全部改成 `setObject(_:forKeyedSubscript:)`（`java` / `source` / `cookie` / `getVar` / `setVar` / `result` / `baseUrl` / 四个 source 字段）
-- `getVar` / `setVar` / `result` 的 Swift 闭包显式声明为 `@convention(block)`，否则不会被桥接成 JS function
-- 向 JS 传可选字符串时统一 `?? ""`，避免 Optional 被包成对象
-
-## 5.2 1.2.4：定位到 `searchUrl = @js:` 的源
-
-1.2.3 的日志终于给出了确切位置：
-
-```
-11:29:45.475  [I] WebBook 准备搜索 📂书海小说（发现） searchUrl=@js:
-              // var ua = "Mozilla/5.0 ..."       ← searchUrl 整条是多行 JS
-11:29:46.933  [I] App 启动 legado 1.2.3(40)        ← 崩溃
-```
-
-**根因**：`searchUrl` 以 `@js:` 开头的书源，`searchUrl` 后面整段是 JS 脚本。旧实现里 `JavaScriptParser.canExecute` 不认 `@js:` 前缀、`extractJS` 也没剥掉前缀，于是脚本执行失败后，又把整段 JS 当成 URL 交给 `AnalyzeUrl` 拼接（`https://站点/@js:....`），在这条路径上崩掉。
-
-1.2.4 修复：
-
-- `canExecute` / `extractJS` 正确支持 `@js:` 前缀（剥掉前缀再执行）
-- 脚本长度超过 4000 字符直接跳过该源
-- 脚本里含 `java.ajax`（同步抓网络、会卡主线程）直接跳过该源
-- 脚本没算出 `http(s)` 地址时**抛错跳过**，不再把 JS 源码当 URL 拼接
-- 记录脚本执行耗时，方便发现慢脚本
-- `AnalyzeUrl` 增加两处打点（analyze 开始 / 变量替换耗时），崩溃时能区分卡在哪一步
-
-### 崩溃报告为什么一直没出现
-
-原来的判断是「上次启动 3 秒内退出才算异常」，而崩溃都发生在启动 3 秒之后，所以重启时被当成正常退出，`crash-*.log` 永远不合并进主日志。1.2.4 改为**按文件去重**：只要有没导入过的 `crash-*.log` 就合并，并写入 `===== 崩溃报告 xxx =====`。
-
-## 5.3 1.2.3：让日志能真正定位崩溃
-
-### 为什么之前日志「什么都没写」
-
-`AppLogger` 原来是 `queue.async` 异步落盘，进程被系统杀掉（watchdog / OOM）或崩溃在异步队列 flush 之前时，最后几秒的日志全部丢失——所以你会看到「点了搜索，日志里连搜索 URL 都没有，然后就重启了」。
-
-1.2.3：
-
-- 日志改为 **同步写 + 立即 flush**，崩溃前每一条都落盘
-- 崩溃捕获改成 **`backtrace` + `backtrace_symbols_fd`**，预先打开文件描述符，只调用 async-signal-safe 的 API（原来的实现用了 FileManager/DateFormatter，在崩溃上下文里很可能直接失败，所以一直没有 crash 文件）
-- 补了 `SIGTRAP`（Swift `fatalError` / 断言走这个信号）
-- 慢规则告警：任何一条规则执行超过 300ms 或规则长度超过 500 字符，都会记录 `[W] Rule 慢规则 <类型> <耗时> rule=...`
-- `WebBook` 在解析前先记录「准备搜索 + searchUrl」，analyze 完成后记录 URL 构建耗时
-- 安全阀：响应体超过 512KB 直接跳过解析（避免超大 HTML / 正则回溯把主线程卡死触发 watchdog）
-
-### 下一步
-
-装 1.2.3 复现后，日志里会出现以下之一，用其中任意一条我就能定位：
-
-- `[W] Rule 慢规则 regex 4200ms rule=...` → 卡在某条正则
-- `准备搜索 xxx` 之后没有 `搜索URL` → 卡在 URL 构建（变量替换 / JSON 配置）
-- `crash-<时间戳>.log` 里有 `--- backtrace ---` 调用栈
-- 崩溃前最后一条是某个书源名 → 该源规则有问题
-
-## 5.4 1.2.2：修复删除书源闪退
-
-**现象**：单个删除、批量删除书源都会闪退。
-
-**根因**：删除时只做了 `context.delete(source)` + `save()`，`sources` 数组里的对象没有同步移除。SwiftUI 下一帧重新计算 `ForEach(id: \.sourceId)`、渲染行内容时会访问已经失效的 Core Data 对象（invalidated object），直接崩。批量删除更严重：循环里每删一个都 `save` 一次并异步刷新，中间态被反复渲染。
-
-**修复**：
-
-- `deleteSource` 改为「先从内存数组移除 + 一次 save」；新增 `deleteSources(ids:)` 批量入口，一次删除、一次保存
-- 批量删除不再循环调用单个删除
-- 同类隐患一并修掉：书架删书（`BookshelfViewModel.removeBook`）、本地书籍删书（`LocalBookViewModel.deleteBook`）也改为同步移出内存数组
-
-## 5.5 1.2.1：修复校验/搜索闪退 + 书源筛选 + 类型推断
-
-### 崩溃根因（1.2.0 引入）
-
-`WebBook` 是 nonisolated async，并发搜索/批量校验时任务会在后台线程执行，而它入参是 Core Data 的 `BookSource`，规则解析还会创建 JavaScriptCore 上下文——两者都只能在主线程碰，于是直接闪退。日志里表现为「点校验没有任何 `Validate` 记录就重启」「搜索发起 4 个请求后重启」。
-
-修复：整个 `WebBook` 标记 `@MainActor`。网络请求本身是 async，await 期间主线程释放，所以并发收益保留；解析与对象访问全部回到主线程。
-
-### 书源筛选
-
-书源管理右上角新增筛选菜单（对标 Android 的筛选）：
-
-- 类型：全部 / 文本 / 有声 / 漫画 / 文件
-- 状态：全部 / 已启用 / 已停用
-- 筛选结果仍按类型分组，全选只作用于当前筛选结果
-
-### 类型声明缺失的兜底
-
-第三方书源经常不带 `bookSourceType`（或写 0），只靠"自我声明"会全部落进文本类。1.2.1：
-
-- 导入/订阅时若没有声明，用**分组名 + 名称 + 域名**推断：含「有声/音频/听书/音乐/music/listen」→ 有声；含「漫画/图片/图源/cosplay/manga/comic/hentai」→ 漫画
-- 书源管理筛选菜单里提供「**重新识别书源类型**」，对已导入的历史书源批量补全
-
-## 5.6 1.2.0：书源管理与搜索重构
-
-### 书源管理
-
-- **按声明自动分类**：导入后按 `bookSourceType` 归入「文本 / 有声 / 漫画 / 文件」四个独立 Section，不混排，标题右侧显示数量
-- **批量管理**（编辑模式）：多选 + 一键全选，支持批量启用、停用、**校验**、删除
-- **批量校验**（对标 Android 版校验书源）：
-  - 文本源：用 `checkKeyWord`（缺省「我的」）跑一次真实搜索，能解析出结果即算可用，耗时回写 `respondTime`
-  - 有声 / 漫画 / 文件源：只校验站点可达（本版本不支持其阅读）
-  - 并发执行（复用搜索并发数），实时显示 `已校验/总数` 进度
-  - 结果明细：每源的可用性、耗时、失败原因（超时 / ATS 拦截 / 无结果 / 规则报错）
-  - 支持「一键停用全部失败书源」
-
-### 搜索
-
-- **并发搜索**：并发数 1–8 可调（我的 → 搜索 → 搜索设置），默认 4；任务在主线程发起，网络请求并发，解析仍在主线程串行，既不跨线程碰 Core Data 又能把网络等待叠起来
-- **进度条**：`已搜索书源数 / 书源总数` + 百分比，边搜边出结果
-- **结果聚合**：书名与作者都相同视为同一本书，列表显示「源名 等 N 个源」，点开弹出书源选择（对标 Android 的换源入口）；只有一个源时直接加入书架
-- 保留 90 秒总时限，超时后使用已完成的结果
-
-## 5.7 1.1.4：按书源类型分流（崩溃根因）
-
-书源 JSON 顶层有 `bookSourceType`：`0`=文本、`1`=音频（有声书）、`2`=图片（漫画）、`3`=文件。导入时已经落库（`URLSchemeHandler` / `SourceSubscriptionManager` / `SourceViewModel`），但**搜索链路只把它写进日志，没有拿它分流**——有声源、漫画源被当成文本源解析，这就是上个版本日志里崩在 `type=1` 源上的原因。
-
-1.1.4 起：
-
-- 搜索只跑 `bookSourceType == 0` 的源，其余直接跳过（不请求、不解析、不创建 JS 上下文）
-- 日志记录 `跳过 N 个非文本书源（有声/漫画/图片）`
-- 若启用的源全是非文本类型，提示「当前版本只支持电子书文本源」
-- 书源选择器里给非文本源打上「有声 / 漫画 / 文件」标签并置灰，点击无效
-- 书源管理列表沿用类型图标（🎧 / 🖼）
-
-> `bookSourceGroup` 里的「🔊有声书源」只是分组标题，不能作为判据；`bookSourceType` 才是权威声明。若某源声明 `0` 但实际是有声/漫画站，仍可能出问题——下个版本会加「解析失败自动禁用该源」的兜底。
-
-## 5.8 1.1.3：根据实测日志修复
-
-你提供的 `app.log` 已经把范围缩小到解析阶段：
-
-```
-10:09:21.041 Search 书源开始 🔊Hi歌曲音乐网 type=1
-10:09:23.462 HTTP status=200 bytes=25877 耗时=2420ms
-10:09:25.237 App 启动 …            ← 中间没有 WebBook「搜索解析」，说明崩在解析里
-```
-
-同时日志暴露了两个非崩溃但致命的可用性问题：
-
-| 现象 | 原因 | 1.1.3 处理 |
-| --- | --- | --- |
-| `http://…` 源全部 `-1022 ATS` 失败 | Info.plist 没有 ATS 例外 | 加 `NSAllowsArbitraryLoads` / `NSAllowsArbitraryLoadsInWebContent` |
-| `搜索URL https://www.min-yuan.com/@js:` | `searchUrl` 整条是规则时没执行 | 支持 `@js:` / `<js>` / `{{…}}` 形式的 searchUrl，先算出真实地址 |
-| 835 个源串行搜索极慢 | 无超时上限，请求 30s 超时 | 请求超时降到 12s，整体 90s 上限 |
-| 崩在哪条规则看不出来 | 日志太粗 | `bookList` 规则、元素个数、每个字段的规则与失败原因全部记录 |
-
-解析侧加固：
-
-- **XPath 预检**：括号/引号不配平、超长表达式直接判为非法并抛错，不再交给 libxml2（非法 XPath 可能直接崩）
-- **JSONPath 递归深度上限 64**：`$..` 遇到畸形/超深结构不会把栈打爆
-- **字段级隔离**：单个字段解析失败只记日志并返回空串，不再整源失败
-- **上次崩溃栈并入 app.log**：下次启动时把 `crash-*.log` 的调用栈写进主日志，导出一次就够
-
-## 5.9 1.1.2 更新：日志版 + 精简入口 + 版本化产物
-
-### 1) 闪退日志（重点）
-
-装上新版本后如果仍然闪退，按下面步骤取日志发我即可定位：
-
-1. 闪退后重新打开 App（不要先杀进程）
-2. 设置 → 诊断 → **导出运行日志** → 存到「文件」或直接发微信/AirDrop
-3. 崩溃当次的记录在 `crash-*.log` 里，运行轨迹在 `app.log` 里
-
-日志内容包含：App 版本、系统版本、崩溃类型（NSException / 信号）、调用栈、崩溃前 200 条运行日志（搜索关键词、每个书源的 URL / HTTP 状态 / 响应长度 / 耗时 / 解析条数 / 失败原因）。
-
-实现：`Core/Logging/AppLogger.swift`（滚动日志，单文件 2MB 保留 3 份）+ `Core/Logging/CrashReporter.swift`（`NSSetUncaughtExceptionHandler` + `SIGABRT/SIGSEGV/SIGBUS/SIGILL/SIGFPE`）。
-
-### 2) 移除「发现」和「RSS 订阅」
-
-- 首页 Tab 从 4 个减少为 2 个：书架 / 我的
-- 删除 `Features/Discovery/DiscoveryView.swift`、`Features/RSS/RSSSubscriptionView.swift`、`RssSourceEditView.swift`、`RssFavoritesView.swift`，以及旧的 `Legado/ContentView.swift`
-- RSS 数据表与 `legado://import/rssSource` 深链保留（避免旧数据异常），但没有界面入口
-
-### 3) 产物命名与版本同步
-
-- Release 产物：`Legado-1.1.2.ipa`（文件名以版本号结尾）
-- Artifact：`Legado-iOS-IPA-1.1.2`、`Legado-iOS-App-1.1.2`、`Legado-xcresult-1.1.2`
-- 打包时用 tag 名覆盖 `CFBundleShortVersionString`，`CFBundleVersion` 用 CI 构建号，**IPA 内版本与 Release 标签一致**
-
-## 5.10 1.1.1 修复：搜索闪退
-
-**现象**：订阅一批书源后，一搜索就闪退。
-
-**根因**：`ExecutionContext.jsContext` 里写的是 `let context = JSContext()!`。`JSContext()` 是可失败初始化器，在多书源并发搜索、首次创建 JS VM 时可能返回 `nil`，强解包必崩。而订阅来的书源普遍带 `@js:` / `<js>` 规则，所以「只有订阅后才会崩」。
-
-**修复**：
-
-- `JSContext` 改为可选创建：全局锁串行化 + 失败重试 3 次 + 失败时抛 `RuleError.executionFailed`，不再崩溃
-- 搜索从 `withTaskGroup` 并发改为串行：书源是 Core Data 对象、规则解析会创建 JavaScriptCore 上下文，两者都不允许被并发触碰
-- 结果改为边搜边显示；单个源失败不再中断整体搜索，失败原因会带上源名显示出来
-- 顺带修掉 `WebBook` 里两处 `body.data(using: .utf8)!` 强解包
-
-## 5.11 1.1 更新：本地格式 + 排版精度
-
-### 本地书籍格式
-
-| 格式 | 说明 |
-| --- | --- |
-| TXT | 自动识别 UTF-8 / UTF-16 / GB18030 / Big5；分章支持 `第X章/回/节/卷`、`Chapter N`、序章/楔子/番外；识别不到标题时按长度切块 |
-| EPUB | 复用自实现 `EPUBParser`（OPF + spine + 目录 + 封面） |
-| PDF | PDFKit 逐页抽取文字，每 8 页一章，首页渲染封面；扫描版（无文字层）会明确提示不支持 OCR |
-| MOBI / AZW3 | 自解析 PalmDB + MOBI Header + EXTH（书名/作者），PalmDOC 解压；HUFF/CDIC 压缩提示转 EPUB |
-| HTML / XHTML | 按 h1~h3 分章，标签清洗后保留段落换行 |
-| Markdown | 按 `#` 标题分章，去掉强调/链接/列表标记 |
-| CBZ | 自实现 zip（stored + deflate）解压到 `Documents/Manga/`，按页图片纵向阅读 |
-
-导入时每章正文会落盘到 `Documents/LocalChapters/<bookId>/`，翻页直接读缓存，不再每次重新解析整本。
-
-### 排版精度
-
-之前分页用 CoreText、显示却用 SwiftUI `Text`，两边行高/段距算法不同，导致「分页边界」和「屏幕显示」对不上，字距、首行缩进、段距设置也基本不生效。1.1 把两者统一：
-
-- 分页与渲染共用同一份 `NSAttributedString`（`PageSplitter.attributedText`），正文改为 CoreText 直绘（`PageTextView`）
-- 新增排版项：字距（kern）、首行缩进（0–4 字）、行高倍数（0.8–2.0）、两端对齐
-- 行末断行策略改为 `pushOut`（允许标点挤压，中文行尾更整齐）
-- 滚动模式把行高倍数折算成行距，保持与分页模式视觉一致
-
-## 6. 构建
+## 4. 构建
 
 ### 云端（无需 Mac）
 
-推送到 `main` 或手动触发 `Actions → iOS CI → Run workflow`，完成后在 Artifacts 下载 `Legado-iOS-IPA`（`Legado-unsigned.ipa`），用 ESign / Feather / Sideloadly 自签安装。
+推送到 `main` 或手动触发 `Actions → iOS CI → Run workflow`，完成后在 Artifacts 下载 `Legado-iOS-IPA-<版本>`（`Legado-<版本>.ipa`），用 ESign / Feather / Sideloadly 自签安装。
 
 构建失败时，`error:` 行会以 **annotation** 形式贴在运行页面（不需要登录也能看），同时日志末尾 80 行会打印在 Build 之后的步骤里。
 
@@ -381,19 +106,18 @@ open Legado.xcodeproj    # ⌘R
 python tools/check_swift_balance.py Core
 ```
 
-## 7. 已知差距（需要继续做）
+## 5. 已知差距
 
 - **书源变量持久化**：`java.put` / `@put` 只在单次解析内有效，未写回 `BookSource.variable`；依赖登录态变量的书源需要补这一层。
 - **`loginCheckJs` / `jsLib`**：字段存在，尚未在 JS 上下文里预置。
 - **`webJs` / `sourceRegex`**：正文规则里的这两个字段尚未执行。
 - **单元测试未接线**：`Tests/Unit/RuleEngineTests.swift` 是规则引擎回归测试（覆盖 `class.` 语法、`##`、`||`、JSONPath 通配/递归、XPath、`java.*`），但 Xcode 工程里没有测试 target，该文件不参与编译；目前靠 `Type Check` workflow 做类型检查、靠 `tools/check_swift_balance.py` 做结构自检。把它接成真正的测试 target 是下一步。
-- **RSS 深链导入**：仍是占位实现。
 - **UMD**：仅有格式识别，解析未实现（会提示先转成 TXT/EPUB）。
 - **PDF 扫描版**：无文字层时无法提取正文，未做 OCR。
 - **CBZ 漫画**：按页纵向阅读，暂无双页/左右翻页/预加载。
 - **合规**：本项目不含任何书籍内容、不内置书源；请只导入你有权使用的内容。
 
-## 8. 技术栈
+## 6. 技术栈
 
 - UI：SwiftUI + UIKit（阅读器）
 - 架构：MVVM
@@ -401,12 +125,12 @@ python tools/check_swift_balance.py Core
 - 网络：URLSession（含 GBK/Big5 编码探测、WKWebView 兜底）
 - HTML：SwiftSoup｜XPath：Kanna｜JS：JavaScriptCore｜ZIP：ZIPFoundation
 
-## 9. 链接
+## 7. 链接
 
 - 原项目：[gedoor/legado](https://github.com/gedoor/legado) / [LegadoTeam/legado](https://github.com/LegadoTeam/legado)
 - 帮助文档：<https://www.legado.top/>
 - 书源规则教程：<https://mgz0227.github.io/The-tutorial-of-Legado/>
 
-## 10. 免责声明
+## 8. 免责声明
 
 仅供学习交流，请勿用于商业用途；使用时请遵守当地法律法规并尊重版权。

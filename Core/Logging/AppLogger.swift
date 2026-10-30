@@ -29,8 +29,8 @@ final class AppLogger {
     private var memoryLines: [String] = []
     private let maxMemoryLines = 400
 
-    private let maxFileSize: UInt64 = 2 * 1024 * 1024
-    private let maxFileCount = 3
+    /// 最多保留的日志文件数（每次启动一个文件）
+    private let maxFileCount = 12
 
     private var handle: FileHandle?
     private var currentURL: URL?
@@ -65,7 +65,10 @@ final class AppLogger {
         if let url = currentURL {
             return url
         }
-        let url = Self.directory.appendingPathComponent("app.log")
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: Date())
+        let url = Self.directory.appendingPathComponent("app-\(stamp).log")
         try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
@@ -115,7 +118,6 @@ final class AppLogger {
         queue.sync {
             handle?.write(data)
             try? handle?.synchronize()
-            rotateIfNeeded()
         }
     }
 
@@ -137,49 +139,37 @@ final class AppLogger {
 
     // MARK: - 文件管理
 
+    /// 每次启动新建一个 app-yyyyMMdd-HHmmss.log，文件名即启动时间（精确到秒），不需要手动改名
     private func openLogFile() {
         queue.async { [weak self] in
             guard let self else { return }
             let directory = Self.directory
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-            let url = directory.appendingPathComponent("app.log")
-            if !FileManager.default.fileExists(atPath: url.path) {
-                FileManager.default.createFile(atPath: url.path, contents: nil)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd-HHmmss"
+            let stamp = formatter.string(from: Date())
+
+            var url = directory.appendingPathComponent("app-\(stamp).log")
+            var suffix = 2
+            while FileManager.default.fileExists(atPath: url.path) {
+                url = directory.appendingPathComponent("app-\(stamp)-\(suffix).log")
+                suffix += 1
             }
+
+            FileManager.default.createFile(atPath: url.path, contents: nil)
             self.handle = try? FileHandle(forWritingTo: url)
-            self.handle?.seekToEndOfFile()
             self.currentURL = url
+
+            self.trimArchives(keeping: self.maxFileCount)
         }
     }
 
-    private func rotateIfNeeded() {
-        guard let currentHandle = handle,
-              let size = try? currentHandle.seekToEnd(),
-              size > maxFileSize else { return }
-
-        currentHandle.closeFile()
-        handle = nil
-
-        let directory = Self.directory
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let stamp = formatter.string(from: Date())
-        let archive = directory.appendingPathComponent("app-\(stamp).log")
-        try? FileManager.default.moveItem(at: directory.appendingPathComponent("app.log"), to: archive)
-
-        trimArchives()
-
-        let url = directory.appendingPathComponent("app.log")
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try? FileHandle(forWritingTo: url)
-        currentURL = url
-    }
-
-    private func trimArchives() {
-        let archives = allLogFiles().filter { $0.lastPathComponent != "app.log" }
-        guard archives.count > maxFileCount else { return }
-        for url in archives.dropFirst(maxFileCount) {
+    /// 只保留最近 N 个日志文件
+    private func trimArchives(keeping count: Int) {
+        let logs = allLogFiles()   // 已按文件名（即时间）降序
+        guard logs.count > count else { return }
+        for url in logs.dropFirst(count) {
             try? FileManager.default.removeItem(at: url)
         }
     }

@@ -105,17 +105,16 @@ class AnalyzeUrl {
         }
         
         // 9. 处理相对 URL
-        if !urlPart.hasPrefix("http"), let base = baseUrl {
-            if urlPart.hasPrefix("/") {
-                // 取 baseUrl 的 scheme + host
-                if let baseURL = URL(string: base),
-                   let scheme = baseURL.scheme,
-                   let host = baseURL.host {
-                    let port = baseURL.port.map { ":\($0)" } ?? ""
-                    urlPart = "\(scheme)://\(host)\(port)\(urlPart)"
+        // 注意：不能用 hasPrefix("http") 判断绝对地址——协议相对地址（//host/path）和被误拼的
+        // 绝对地址都会漏过去，之前就出现过 "https://站点/book-detail/https://另一站/..." 这种畸形 URL。
+        if !hasScheme(urlPart) {
+            if urlPart.hasPrefix("//") {
+                // 协议相对：沿用 base 的 scheme
+                if let base = baseUrl, let baseURL = URL(string: base), let scheme = baseURL.scheme {
+                    urlPart = "\(scheme):\(urlPart)"
                 }
-            } else {
-                urlPart = base.hasSuffix("/") ? base + urlPart : base + "/" + urlPart
+            } else if let base = baseUrl, let baseURL = URL(string: base) {
+                urlPart = URL(string: urlPart, relativeTo: baseURL)?.absoluteString ?? urlPart
             }
         }
         
@@ -173,6 +172,15 @@ class AnalyzeUrl {
         return context
     }
     
+    /// 是否已经带协议（http://、https://、file:// 等）
+    private static func hasScheme(_ value: String) -> Bool {
+        guard let match = value.range(
+            of: "^[a-zA-Z][a-zA-Z0-9+.\\-]*://",
+            options: .regularExpression
+        ) else { return false }
+        return match.lowerBound == value.startIndex
+    }
+
     // MARK: - JSON 配置查找
     
     /// 在 URL 字符串中查找 JSON 配置的起始位置

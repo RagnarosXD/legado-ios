@@ -392,6 +392,27 @@ class SourceViewModel: ObservableObject {
         if let v = jsonDataValue(data["ruleReview"]) { source.ruleReviewData = v }
     }
     
+    /// 给没有类型声明的书源做启发式识别（分组名/名称/域名），返回改动数量
+    @discardableResult
+    func inferSourceTypes() -> Int {
+        var changed = 0
+        for source in sources where source.bookSourceType == 0 {
+            let inferred = BookSource.inferType(
+                group: source.bookSourceGroup,
+                url: source.bookSourceUrl,
+                name: source.bookSourceName
+            )
+            if inferred != 0 {
+                source.bookSourceType = inferred
+                changed += 1
+            }
+        }
+        if changed > 0 {
+            try? CoreDataStack.shared.save()
+        }
+        return changed
+    }
+
     func exportAllSources() -> Data? {
         let exportSources = sources.map { ExportableSource(from: $0) }
         let encoder = JSONEncoder()

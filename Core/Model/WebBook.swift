@@ -32,6 +32,10 @@ struct WebChapter {
 }
 
 /// WebBook 核心操作类
+/// 整个类固定在主线程执行：入参是 Core Data 的 BookSource/Book，规则解析还会创建 JavaScriptCore 上下文，
+/// 两者都不允许在后台线程触碰（这是 1.2.0 并发搜索、批量校验闪退的根因）。
+/// 网络请求本身是 async，await 期间主线程会释放，所以并发仍然有效。
+@MainActor
 class WebBook {
     
     private static let ruleEngine = RuleEngine()

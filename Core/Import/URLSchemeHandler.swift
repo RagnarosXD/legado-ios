@@ -147,7 +147,17 @@ struct URLSchemeHandler {
             source.bookSourceName = raw["bookSourceName"] as? String ?? url
             source.bookSourceGroup = raw["bookSourceGroup"] as? String
             source.bookSourceComment = raw["bookSourceComment"] as? String
-            source.bookSourceType = Int32(raw["bookSourceType"] as? Int ?? 0)
+            // 优先用书源自己的声明；没有就用分组名/域名推断，避免有声/漫画源被当成文本源
+            let declaredType = Int32(raw["bookSourceType"] as? Int ?? 0)
+            if declaredType != 0 {
+                source.bookSourceType = declaredType
+            } else {
+                source.bookSourceType = BookSource.inferType(
+                    group: raw["bookSourceGroup"] as? String,
+                    url: url,
+                    name: raw["bookSourceName"] as? String ?? ""
+                )
+            }
             source.searchUrl = raw["searchUrl"] as? String
             source.exploreUrl = raw["exploreUrl"] as? String
             source.header = raw["header"] as? String

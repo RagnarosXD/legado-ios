@@ -99,6 +99,19 @@ extension BookSource {
         default: return "文本"
         }
     }
+
+    /// 很多第三方书源不带 bookSourceType（或写成 0），只能用分组名/名称/域名做启发式补全。
+    /// 返回 0 表示看不出来，保持文本。
+    static func inferType(group: String?, url: String, name: String) -> Int32 {
+        let haystack = [group ?? "", name, url].joined(separator: " ").lowercased()
+
+        let audioKeywords = ["有声", "音频", "听书", "音乐", "歌曲", "评书", "audio", "music", "ting", "listen", "audiobook"]
+        let imageKeywords = ["漫画", "图片", "图源", "写真", "cosplay", "manga", "comic", "manhua", "photo", "gallery", "hentai"]
+
+        if audioKeywords.contains(where: { haystack.contains($0) }) { return 1 }
+        if imageKeywords.contains(where: { haystack.contains($0) }) { return 2 }
+        return 0
+    }
     
     var isValid: Bool {
         !bookSourceUrl.isEmpty && !bookSourceName.isEmpty

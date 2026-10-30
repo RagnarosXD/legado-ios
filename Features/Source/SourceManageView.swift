@@ -28,6 +28,10 @@ struct SourceManageView: View {
     @State private var showingExporter = false
     @State private var exportDocument = JSONDataDocument()
     @State private var exportFileName = "bookSource"
+
+    // 筛选（对标 Android 书源管理的筛选菜单）
+    @State private var filterType: Int32? = nil
+    @State private var filterEnabled: Bool? = nil
     
     var body: some View {
         ZStack {
@@ -38,8 +42,14 @@ struct SourceManageView: View {
                         subtitle: "点击右上角导入或创建书源",
                         imageName: "square.grid.2x2"
                     )
+                } else if filteredSources.isEmpty {
+                    EmptyStateView(
+                        title: "没有符合筛选的书源",
+                        subtitle: "调整右上角筛选条件",
+                        imageName: "line.3.horizontal.decrease.circle"
+                    )
                 } else {
-                    // 按书源自带声明的 bookSourceType 分类，不同类型不混排
+                    // 按 bookSourceType 分类，不同类型不混排
                     sourceSection(.text)
                     sourceSection(.audio)
                     sourceSection(.image)
@@ -63,6 +73,29 @@ struct SourceManageView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
+                        Menu {
+                            Picker("类型", selection: $filterType) {
+                                Text("全部类型").tag(Int32?.none)
+                                Text("文本").tag(Int32?(0))
+                                Text("有声").tag(Int32?(1))
+                                Text("漫画").tag(Int32?(2))
+                                Text("文件").tag(Int32?(3))
+                            }
+                            Picker("状态", selection: $filterEnabled) {
+                                Text("全部状态").tag(Bool?.none)
+                                Text("已启用").tag(Bool?(true))
+                                Text("已停用").tag(Bool?(false))
+                            }
+                            Divider()
+                            Button {
+                                inferTypes()
+                            } label: {
+                                Label("重新识别书源类型", systemImage: "wand.and.stars")
+                            }
+                        } label: {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                        }
+
                         Menu {
                             Button(action: { showingImport = true }) {
                                 Label("导入书源", systemImage: "square.and.arrow.down")
@@ -155,12 +188,28 @@ struct SourceManageView: View {
         }
     }
     
-    // MARK: - 分组渲染
+    // MARK: - 筛选与分组
+
+    /// 当前筛选条件下的书源
+    private var filteredSources: [BookSource] {
+        viewModel.sources.filter { source in
+            if let filterType, source.bookSourceType != filterType { return false }
+            if let filterEnabled, source.enabled != filterEnabled { return false }
+            return true
+        }
+    }
+
+    private func inferTypes() {
+        let changed = viewModel.inferSourceTypes()
+        if changed > 0 {
+            Task { await viewModel.loadSources() }
+        }
+    }
 
     /// 按 bookSourceType 分组，不同类型互不混排
     @ViewBuilder
     private func sourceSection(_ section: SourceTypeSection) -> some View {
-        let items = viewModel.sources.filter { $0.bookSourceType == section.rawValue }
+        let items = filteredSources.filter { $0.bookSourceType == section.rawValue }
         if !items.isEmpty {
             Section {
                 ForEach(items, id: \.sourceId) { source in
@@ -228,10 +277,11 @@ struct SourceManageView: View {
     }
     
     private func selectAll() {
-        if selectedSources.count == viewModel.sources.count {
+        let visible = filteredSources
+        if selectedSources.count == visible.count {
             selectedSources.removeAll()
         } else {
-            selectedSources = Set(viewModel.sources.map { $0.sourceId })
+            selectedSources = Set(visible.map { $0.sourceId })
         }
     }
     

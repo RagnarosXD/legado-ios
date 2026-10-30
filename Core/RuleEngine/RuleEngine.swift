@@ -355,23 +355,62 @@ class RuleEngine {
 
         let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let isJson = trimmedBody.hasPrefix("{") || trimmedBody.hasPrefix("[")
-        let rule = ruleStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        var rule = ruleStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        var forceHTML = false
 
         // @json: 前缀可以强制走 JSON 解析（即使响应体是 HTML 片段包裹的 JSON）
         if rule.lowercased().hasPrefix("@json:") {
             return try getJsonElements(ruleStr: rule, body: body)
         }
 
+        // @css: 前缀要剥掉，否则会被整条当成 CSS 选择器（"@css:.list" 永远选不中）
+        if rule.lowercased().hasPrefix("@css:") {
+            rule = String(rule.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+            forceHTML = true
+        }
+
+        // @xpath: 列表：用 libxml2 选节点，再把节点 HTML 交给字段规则
+        if rule.lowercased().hasPrefix("@xpath:") {
+            let xpath = String(rule.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return try getXPathElements(xpath: xpath, body: body, baseUrl: baseUrl)
+        }
+
         // 规则本身是 JSONPath 时也必须按 JSON 解析：否则会被当成 CSS 选择器丢给 SwiftSoup，
         // 抛出 "SwiftSoup.Exception 错误 0"（日志里 $.data.chapters[*] 就是这么炸的）
         let looksLikeJSONPath = rule.hasPrefix("$.") || rule.hasPrefix("$[")
+        // 有些源写 data.list 这种省略 $. 的路径：仅当响应体确实是 JSON 时按 JSON 处理
+        let shorthandJSONPath = isJson && !forceHTML && !rule.hasPrefix("$")
+            && rule.range(of: #"^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z0-9_*\[\]{}]+)+$"#, options: .regularExpression) != nil
 
-        if isJson || looksLikeJSONPath {
-            return try getJsonElements(ruleStr: rule, body: body)
+        if !forceHTML && (isJson || looksLikeJSONPath || shorthandJSONPath) {
+            let jsonRule = (shorthandJSONPath && !rule.hasPrefix("$")) ? "$." + rule : rule
+            return try getJsonElements(ruleStr: jsonRule, body: body)
         }
         return try getHtmlElements(ruleStr: rule, body: body, baseUrl: baseUrl)
     }
     
+    /// 从 HTML 用 XPath 提取元素列表
+    private func getXPathElements(xpath: String, body: String, baseUrl: String?) throws -> [ElementContext] {
+        guard XPathParser.isSafe(xpath) else {
+            AppLogger.error("Rule", "XPath 列表表达式不合法：\(xpath.prefix(160))")
+            throw RuleError.invalidRule("XPath 表达式不合法")
+        }
+
+        do {
+            let doc = try Kanna.HTML(html: body, encoding: .utf8)
+
+            var elements: [ElementContext] = []
+            for node in doc.xpath(xpath) {
+                guard let html = node.toHTML, !html.isEmpty else { continue }
+                elements.append(ElementContext(element: html, baseUrl: baseUrl))
+            }
+            return elements
+        } catch {
+            AppLogger.error("Rule", "XPath 列表解析失败 err=\(error)")
+            throw RuleError.noDocument
+        }
+    }
+
     /// 从 HTML 提取元素列表
     private func getHtmlElements(ruleStr: String, body: String, baseUrl: String?) throws -> [ElementContext] {
         let doc: SwiftSoup.Document

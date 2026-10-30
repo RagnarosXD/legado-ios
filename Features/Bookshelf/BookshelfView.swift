@@ -15,6 +15,8 @@ struct BookshelfView: View {
     @State private var showingSourceManage = false
     @State private var showingAddBook = false
     @State private var showingSearch = false
+    /// 长按菜单里选中的待换源书籍
+    @State private var changeSourceBook: Book?
     
     var body: some View {
         Group {
@@ -115,6 +117,22 @@ ToolbarItem(placement: .navigationBarTrailing) {
         .refreshable {
             await viewModel.refreshBooks()
         }
+        .sheet(isPresented: Binding(
+            get: { changeSourceBook != nil },
+            set: { if !$0 { changeSourceBook = nil } }
+        )) {
+            if let book = changeSourceBook {
+                ChangeSourceSheet(
+                    isPresented: Binding(
+                        get: { changeSourceBook != nil },
+                        set: { if !$0 { changeSourceBook = nil } }
+                    ),
+                    book: book
+                ) {
+                    Task { await viewModel.refreshBooks() }
+                }
+            }
+        }
     }
     
     @ViewBuilder
@@ -139,6 +157,19 @@ ToolbarItem(placement: .navigationBarTrailing) {
                         BookGridItemView(book: book)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            changeSourceBook = book
+                        } label: {
+                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                        }
+
+                        Button(role: .destructive) {
+                            viewModel.removeBook(book)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
                 }
                 
                 // 加载更多指示器
@@ -168,6 +199,19 @@ ToolbarItem(placement: .navigationBarTrailing) {
             ForEach(viewModel.books, id: \.bookId) { book in
                 NavigationLink(destination: ReaderView(book: book)) {
                     BookListItemView(book: book)
+                }
+                .contextMenu {
+                    Button {
+                        changeSourceBook = book
+                    } label: {
+                        Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                    }
+
+                    Button(role: .destructive) {
+                        viewModel.removeBook(book)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
                 }
             }
             .onDelete { indexSet in

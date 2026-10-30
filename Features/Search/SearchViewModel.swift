@@ -94,6 +94,8 @@ class SearchViewModel: ObservableObject {
         mergedResults.removeAll()
         errorMessage = nil
         searchedSourceCount = 0
+        // 聚合排序依赖关键词
+        searchText = keyword
 
         let allEnabled = sources.filter { $0.enabled && $0.searchUrl != nil }
         // 本版本只有文本阅读器：有声/漫画/图片源的响应结构完全不同，混进文本解析会崩
@@ -251,7 +253,32 @@ class SearchViewModel: ObservableObject {
             }
         }
 
-        mergedResults = order.compactMap { buckets[$0] }
+        // 匹配度排序：完全一致 > 标题前缀 > 标题包含 > 作者包含 > 简介包含
+        mergedResults = order.compactMap { buckets[$0] }.sorted { lhs, rhs in
+            let leftScore = matchScore(lhs)
+            let rightScore = matchScore(rhs)
+            if leftScore != rightScore { return leftScore > rightScore }
+            // 同分时短标题优先（更接近精确命中）
+            if lhs.name.count != rhs.name.count { return lhs.name.count < rhs.name.count }
+            return lhs.name < rhs.name
+        }
+    }
+
+    /// 搜索匹配度打分
+    private func matchScore(_ merged: MergedSearchResult) -> Int {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !keyword.isEmpty else { return 0 }
+
+        let name = merged.name.lowercased()
+        let author = merged.author.lowercased()
+        let intro = (merged.intro ?? "").lowercased()
+
+        if name == keyword { return 1000 }
+        if name.hasPrefix(keyword) { return 800 }
+        if name.contains(keyword) { return 600 }
+        if author.contains(keyword) { return 300 }
+        if intro.contains(keyword) { return 100 }
+        return 0
     }
 
     /// 命中结果写入换源缓存

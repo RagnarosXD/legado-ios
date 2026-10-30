@@ -102,6 +102,10 @@ final class ChangeSourceModel: ObservableObject {
                         cachedAt: Date()
                     )
                     searchResults.append(hit)
+
+                    // 边搜边落盘：用户中途取消/退出，已命中的书源也不会丢
+                    SearchSourceCache.shared.save(name: book.name, author: book.author, hits: [hit])
+                    cachedHits = SearchSourceCache.shared.hits(name: book.name, author: book.author)
                 }
             }
         }

@@ -55,8 +55,8 @@ struct ReaderView: View {
                             dismiss()
                         }) {
                             Image(systemName: "chevron.left")
-                                .font(.body)
-                                .frame(width: 40, height: 36)
+                                .font(.subheadline)
+                                .frame(width: 36, height: 30)
                         }
 
                         Text(book.name)
@@ -74,13 +74,13 @@ struct ReaderView: View {
 
                         Button(action: { showingChapterList = true }) {
                             Image(systemName: "list.bullet")
-                                .font(.body)
-                                .frame(width: 40, height: 36)
+                                .font(.subheadline)
+                                .frame(width: 36, height: 30)
                         }
                     }
                     .padding(.horizontal, 6)
-                    .padding(.top, geometry.safeAreaInsets.top + 2)
-                    .padding(.bottom, 2)
+                    .padding(.top, geometry.safeAreaInsets.top)
+                    .padding(.bottom, 0)
                     .background(.ultraThinMaterial)
                     .opacity(showUI ? 1.0 : 0.0)
                     .animation(.easeInOut(duration: 0.25), value: showUI)
@@ -133,8 +133,8 @@ struct ReaderView: View {
                                 .frame(minWidth: 44, alignment: .trailing)
                         }
                         .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
+                        .padding(.top, 2)
+                        .padding(.bottom, 0)
 
                         // 工具栏
                         HStack(spacing: 0) {
@@ -147,7 +147,7 @@ struct ReaderView: View {
                                 Task { await viewModel.cacheAllChapters() }
                             }
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 2)
                     }
                     .padding(.bottom, geometry.safeAreaInsets.bottom)
                     .background(.ultraThinMaterial)
@@ -260,15 +260,14 @@ struct ToolBarButton: View {
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
+            VStack(spacing: 0) {
                 Image(systemName: icon)
-                    .font(.body)
+                    .font(.subheadline)
                 Text(title)
-                    .font(.system(size: 10))
+                    .font(.system(size: 9))
             }
             .frame(maxWidth: .infinity)
             .foregroundColor(.primary)
-            .padding(.vertical, 2)
         }
     }
 }

@@ -22,10 +22,10 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <!-- 书源大量使用 http，且需要加载 http 页面里的图片 -->
+        <!-- 书源大量使用 http。
+             注意：一旦同时声明 NSAllowsArbitraryLoadsInWebContent / NSAllowsLocalNetworking，
+             iOS 会忽略 NSAllowsArbitraryLoads，导致 http 源全部被 ATS 拦截，所以这里只保留一个。 -->
         <key>NSAllowsArbitraryLoads</key>
-        <true/>
-        <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
     <key>LSRequiresIPhoneOS</key>

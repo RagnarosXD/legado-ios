@@ -370,7 +370,13 @@ class RuleEngine {
     
     /// 从 HTML 提取元素列表
     private func getHtmlElements(ruleStr: String, body: String, baseUrl: String?) throws -> [ElementContext] {
-        let doc = try SwiftSoup.parse(body)
+        let doc: SwiftSoup.Document
+        do {
+            doc = try SwiftSoup.parse(body)
+        } catch {
+            AppLogger.error("Rule", "HTML 解析失败 len=\(body.count) err=\(error)")
+            throw RuleError.noDocument
+        }
         if let base = baseUrl { try? doc.setBaseUri(base) }
 
         // 处理反向列表（以 - 开头）与正向前缀
@@ -401,11 +407,22 @@ class RuleEngine {
             if parsed.selector.isEmpty {
                 selected = [doc]
             } else {
-                selected = try doc.select(parsed.selector).array()
+                do {
+                    selected = try doc.select(parsed.selector).array()
+                } catch {
+                    // SwiftSoup 对非法选择器会抛 Exception（如 "SwiftSoup.Exception 错误 0"）
+                    AppLogger.error("Rule", "列表选择器非法 rule=\(rule.prefix(160)) selector=\(parsed.selector.prefix(160))")
+                    throw RuleError.invalidRule("CSS 选择器不合法：\(parsed.selector)")
+                }
             }
 
             for step in parsed.cascades {
-                selected = try selected.flatMap { try $0.select(step).array() }
+                do {
+                    selected = try selected.flatMap { try $0.select(step).array() }
+                } catch {
+                    AppLogger.error("Rule", "级联选择器非法 step=\(step.prefix(160))")
+                    throw RuleError.invalidRule("CSS 选择器不合法：\(step)")
+                }
             }
 
             if let index = parsed.index {
@@ -606,10 +623,15 @@ class RuleEngine {
         if isJson {
             context.jsonString = body
         } else {
-            context.document = try SwiftSoup.parse(body)
+            do {
+                context.document = try SwiftSoup.parse(body)
+            } catch {
+                AppLogger.error("Rule", "HTML 解析失败 len=\(body.count) err=\(error)")
+                throw RuleError.noDocument
+            }
         }
         context.baseURL = baseUrl.flatMap { URL(string: $0) }
-        
+
         let result = try executeSingle(rule: ruleStr, context: context)
         return result.list ?? (result.string.map { [$0] } ?? [])
     }
@@ -642,11 +664,21 @@ class CSSParser: RuleExecutor {
         if parsed.selector.isEmpty {
             elements = [root]
         } else {
-            elements = try root.select(parsed.selector).array()
+            do {
+                elements = try root.select(parsed.selector).array()
+            } catch {
+                // 正文/字段规则里的非法选择器：转成可读错误，避免把 SwiftSoup 的英文异常抛给用户
+                AppLogger.error("Rule", "选择器非法 rule=\(rule.prefix(160)) selector=\(parsed.selector.prefix(160))")
+                throw RuleError.invalidRule("CSS 选择器不合法：\(parsed.selector)")
+            }
         }
 
         for step in parsed.cascades {
-            elements = try elements.flatMap { try $0.select(step).array() }
+            do {
+                elements = try elements.flatMap { try $0.select(step).array() }
+            } catch {
+                throw RuleError.invalidRule("CSS 选择器不合法：\(step)")
+            }
         }
 
         if let index = parsed.index {
@@ -690,15 +722,36 @@ class CSSParser: RuleExecutor {
             return CSSParser.absolute(try element.attr("href"), base: base)
 
         case "src", "abs:src":
-            return CSSParser.absolute(try element.attr("src"), base: base)
+            // 很多站的封面是懒加载：真实地址在 data-src / data-original 里，src 是占位图
+            var raw = try element.attr("src")
+            for fallback in ["data-src", "data-original", "data-lazy-src", "data-echo"] where raw.isEmpty {
+                raw = try element.attr(fallback)
+            }
+            return CSSParser.absolute(raw, base: base)
 
         default:
             let raw = try element.attr(attr)
             if raw.isEmpty {
                 return try element.text()
             }
-            return raw
+            return CSSParser.absoluteIfNeeded(raw, attr: attr.lowercased(), base: base)
         }
+    }
+
+    /// 只对「看起来是链接」的属性做相对路径补全，避免把正文文本拼成 URL
+    static func absoluteIfNeeded(_ value: String, attr: String, base: URL?) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let urlAttributes: Set<String> = [
+            "src", "href", "url", "poster", "content",
+            "data-src", "data-original", "data-lazy-src", "data-echo"
+        ]
+
+        if urlAttributes.contains(attr) || trimmed.hasPrefix("/") || trimmed.hasPrefix("http") {
+            return absolute(trimmed, base: base)
+        }
+        return trimmed
     }
 
     /// 相对 URL 补全

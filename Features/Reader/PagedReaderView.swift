@@ -11,6 +11,8 @@ import SwiftUI
 struct PagedReaderView: View {
     @ObservedObject var viewModel: ReaderViewModel
     @AppStorage("pageAnimation") var pageAnimationRaw: String = PageAnimationType.cover.rawValue
+    /// 全屏阅读时补的安全区（刘海 / Home 指示条），保证文字不被遮挡
+    var extraInsets: EdgeInsets = EdgeInsets()
     let onTap: () -> Void
     
     @State private var pages: [String] = []
@@ -191,7 +193,11 @@ struct PagedReaderView: View {
         
         guard containerSize.width > 0, containerSize.height > 0 else { return }
         
-        let config = viewModel.makePageConfig(containerSize: containerSize)
+        let config = viewModel.makePageConfig(
+            containerSize: containerSize,
+            extraTop: extraInsets.top,
+            extraBottom: extraInsets.bottom
+        )
         
         // 使用缓存分页
         let result = PageSplitCache.shared.getOrSplit(text: content, config: config)

@@ -434,6 +434,17 @@ class WebBook {
         return content
     }
     
+    /// 相对地址补全（封面、详情页地址）
+    static func normalizeURL(_ value: String, base: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("data:") {
+            return trimmed
+        }
+        guard let baseURL = URL(string: base) else { return trimmed }
+        return URL(string: trimmed, relativeTo: baseURL)?.absoluteString ?? trimmed
+    }
+
     // MARK: - 解析书籍列表
     
     /// 从 HTML/JSON 中解析书籍列表（搜索结果/发现列表通用）
@@ -475,6 +486,11 @@ class WebBook {
                     let text = try ruleEngine.getString(ruleStr: rule, elementContext: elementCtx, baseUrl: baseUrl)
                     if text.isEmpty {
                         AppLogger.debug("Rule", "\(source.bookSourceName) 字段 \(label) 为空 rule=\(rule.prefix(140))")
+                        return ""
+                    }
+                    // 封面/详情地址兜底绝对化：部分规则走 JSON/XPath 分支时不会自动补全
+                    if label == "coverUrl" || label == "bookUrl" {
+                        return WebBook.normalizeURL(text, base: baseUrl)
                     }
                     return text
                 } catch {

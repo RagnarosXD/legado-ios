@@ -147,7 +147,7 @@ class ReaderViewModel: ObservableObject {
     }
 
     /// 当前排版配置（分页与渲染共用）
-    func makePageConfig(containerSize: CGSize) -> PageConfig {
+    func makePageConfig(containerSize: CGSize, extraTop: CGFloat = 0, extraBottom: CGFloat = 0) -> PageConfig {
         PageConfig.from(
             fontSize: fontSize,
             lineSpacing: lineSpacing,
@@ -157,9 +157,9 @@ class ReaderViewModel: ObservableObject {
             lineHeightMultiple: lineHeightMultiple,
             justified: textJustified,
             padding: UIEdgeInsets(
-                top: pagePadding.top,
+                top: pagePadding.top + extraTop,
                 left: pagePadding.leading,
-                bottom: pagePadding.bottom,
+                bottom: pagePadding.bottom + extraBottom,
                 right: pagePadding.trailing
             ),
             containerSize: containerSize,

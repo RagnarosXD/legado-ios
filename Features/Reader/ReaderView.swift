@@ -32,11 +32,20 @@ struct ReaderView: View {
                 viewModel.backgroundColor
                     .ignoresSafeArea()
                 
-                // 内容区域
-                PagedReaderView(viewModel: viewModel) {
+                // 内容区域：铺满整屏（含状态栏/Home 指示条区域），与 Android 阅读器一致
+                PagedReaderView(
+                    viewModel: viewModel,
+                    extraInsets: EdgeInsets(
+                        top: geometry.safeAreaInsets.top,
+                        leading: 0,
+                        bottom: geometry.safeAreaInsets.bottom,
+                        trailing: 0
+                    )
+                ) {
                     autoPageTurnManager.handleTouch()
                     withAnimation { showUI.toggle() }
                 }
+                .ignoresSafeArea()
                 
                 // MARK: - 顶部工具栏（精简版）
                 VStack {
@@ -70,7 +79,7 @@ struct ReaderView: View {
                         }
                     }
                     .padding(.horizontal)
-                    .padding(.top, 8)
+                    .padding(.top, geometry.safeAreaInsets.top + 8)
                     .padding(.bottom, 12)
                     .background(.ultraThinMaterial)
                     .opacity(showUI ? 1.0 : 0.0)
@@ -171,6 +180,7 @@ struct ReaderView: View {
                         }
                         .padding(.vertical, 12)
                     }
+                    .padding(.bottom, geometry.safeAreaInsets.bottom)
                     .background(.ultraThinMaterial)
                     .opacity(showUI ? 1.0 : 0.0)
                     .animation(.easeInOut(duration: 0.25), value: showUI)
@@ -266,6 +276,8 @@ struct ReaderView: View {
         }
         .navigationBarHidden(true)
         .statusBar(hidden: !showUI)
+        // 沉浸模式：隐藏 Home 指示条，与 Android 全屏阅读一致
+        .persistentSystemOverlays(showUI ? .automatic : .hidden)
     }
 }
 

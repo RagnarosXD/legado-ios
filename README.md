@@ -88,7 +88,33 @@
 | 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 1.2.5：真正根因——JSContext 注入方式错误
+## 5. 1.2.6：封面、正文解析报错、全屏阅读
+
+### 1) http 书源仍被 ATS 拦截
+
+1.1.3 里同时写了 `NSAllowsArbitraryLoads` 和 `NSAllowsArbitraryLoadsInWebContent`。按 Apple 规则，**只要出现后者，前者会被忽略**，等于没开例外，于是日志里大量 `-1022 ATS`。现在只保留 `NSAllowsArbitraryLoads`。
+
+### 2) 搜索结果没有封面
+
+- `@src` 取不到时回退 `data-src` / `data-original` / `data-lazy-src` / `data-echo`（懒加载站点）
+- 非 `src` 属性（`data-*` 等）也做相对地址补全，之前只有 `@src`/`@href` 会拼 baseUrl
+- 搜索结果里的 `coverUrl` / `bookUrl` 统一绝对化（`/img/1.jpg` → `https://站点/img/1.jpg`）
+
+### 3) 阅读报错「SwiftSoup.Exception 错误 0」
+
+这是正文/列表规则里的 CSS 选择器非法，SwiftSoup 抛出英文异常后直接冒到 UI。现在所有 `select` / `parse` 都包了 do/catch：
+
+- 日志记录 `选择器非法 rule=... selector=...`
+- 用户看到的是「无效规则：CSS 选择器不合法：xxx」，能直接判断是这个书源的哪条规则有问题
+
+### 4) 全屏阅读（对齐 Android）
+
+- 正文容器 `ignoresSafeArea()` 铺满整屏，背景延伸到屏幕边缘
+- 隐藏 Home 指示条：`.persistentSystemOverlays(showUI ? .automatic : .hidden)`
+- 分页与渲染的 padding 叠加刘海、手势条高度（`makePageConfig(extraTop:extraBottom:)`），文字不会被遮挡
+- 顶部工具栏显示时避让刘海高度
+
+## 5.1 1.2.5：真正根因——JSContext 注入方式错误
 
 1.2.4 的崩溃报告终于带回了调用栈：
 
@@ -114,7 +140,7 @@ detail: name=NSUnknownKeyException
 - `getVar` / `setVar` / `result` 的 Swift 闭包显式声明为 `@convention(block)`，否则不会被桥接成 JS function
 - 向 JS 传可选字符串时统一 `?? ""`，避免 Optional 被包成对象
 
-## 5.1 1.2.4：定位到 `searchUrl = @js:` 的源
+## 5.2 1.2.4：定位到 `searchUrl = @js:` 的源
 
 1.2.3 的日志终于给出了确切位置：
 
@@ -139,7 +165,7 @@ detail: name=NSUnknownKeyException
 
 原来的判断是「上次启动 3 秒内退出才算异常」，而崩溃都发生在启动 3 秒之后，所以重启时被当成正常退出，`crash-*.log` 永远不合并进主日志。1.2.4 改为**按文件去重**：只要有没导入过的 `crash-*.log` 就合并，并写入 `===== 崩溃报告 xxx =====`。
 
-## 5.2 1.2.3：让日志能真正定位崩溃
+## 5.3 1.2.3：让日志能真正定位崩溃
 
 ### 为什么之前日志「什么都没写」
 
@@ -163,7 +189,7 @@ detail: name=NSUnknownKeyException
 - `crash-<时间戳>.log` 里有 `--- backtrace ---` 调用栈
 - 崩溃前最后一条是某个书源名 → 该源规则有问题
 
-## 5.3 1.2.2：修复删除书源闪退
+## 5.4 1.2.2：修复删除书源闪退
 
 **现象**：单个删除、批量删除书源都会闪退。
 
@@ -175,7 +201,7 @@ detail: name=NSUnknownKeyException
 - 批量删除不再循环调用单个删除
 - 同类隐患一并修掉：书架删书（`BookshelfViewModel.removeBook`）、本地书籍删书（`LocalBookViewModel.deleteBook`）也改为同步移出内存数组
 
-## 5.4 1.2.1：修复校验/搜索闪退 + 书源筛选 + 类型推断
+## 5.5 1.2.1：修复校验/搜索闪退 + 书源筛选 + 类型推断
 
 ### 崩溃根因（1.2.0 引入）
 
@@ -198,7 +224,7 @@ detail: name=NSUnknownKeyException
 - 导入/订阅时若没有声明，用**分组名 + 名称 + 域名**推断：含「有声/音频/听书/音乐/music/listen」→ 有声；含「漫画/图片/图源/cosplay/manga/comic/hentai」→ 漫画
 - 书源管理筛选菜单里提供「**重新识别书源类型**」，对已导入的历史书源批量补全
 
-## 5.5 1.2.0：书源管理与搜索重构
+## 5.6 1.2.0：书源管理与搜索重构
 
 ### 书源管理
 
@@ -218,7 +244,7 @@ detail: name=NSUnknownKeyException
 - **结果聚合**：书名与作者都相同视为同一本书，列表显示「源名 等 N 个源」，点开弹出书源选择（对标 Android 的换源入口）；只有一个源时直接加入书架
 - 保留 90 秒总时限，超时后使用已完成的结果
 
-## 5.6 1.1.4：按书源类型分流（崩溃根因）
+## 5.7 1.1.4：按书源类型分流（崩溃根因）
 
 书源 JSON 顶层有 `bookSourceType`：`0`=文本、`1`=音频（有声书）、`2`=图片（漫画）、`3`=文件。导入时已经落库（`URLSchemeHandler` / `SourceSubscriptionManager` / `SourceViewModel`），但**搜索链路只把它写进日志，没有拿它分流**——有声源、漫画源被当成文本源解析，这就是上个版本日志里崩在 `type=1` 源上的原因。
 
@@ -232,7 +258,7 @@ detail: name=NSUnknownKeyException
 
 > `bookSourceGroup` 里的「🔊有声书源」只是分组标题，不能作为判据；`bookSourceType` 才是权威声明。若某源声明 `0` 但实际是有声/漫画站，仍可能出问题——下个版本会加「解析失败自动禁用该源」的兜底。
 
-## 5.7 1.1.3：根据实测日志修复
+## 5.8 1.1.3：根据实测日志修复
 
 你提供的 `app.log` 已经把范围缩小到解析阶段：
 
@@ -258,7 +284,7 @@ detail: name=NSUnknownKeyException
 - **字段级隔离**：单个字段解析失败只记日志并返回空串，不再整源失败
 - **上次崩溃栈并入 app.log**：下次启动时把 `crash-*.log` 的调用栈写进主日志，导出一次就够
 
-## 5.8 1.1.2 更新：日志版 + 精简入口 + 版本化产物
+## 5.9 1.1.2 更新：日志版 + 精简入口 + 版本化产物
 
 ### 1) 闪退日志（重点）
 
@@ -284,7 +310,7 @@ detail: name=NSUnknownKeyException
 - Artifact：`Legado-iOS-IPA-1.1.2`、`Legado-iOS-App-1.1.2`、`Legado-xcresult-1.1.2`
 - 打包时用 tag 名覆盖 `CFBundleShortVersionString`，`CFBundleVersion` 用 CI 构建号，**IPA 内版本与 Release 标签一致**
 
-## 5.9 1.1.1 修复：搜索闪退
+## 5.10 1.1.1 修复：搜索闪退
 
 **现象**：订阅一批书源后，一搜索就闪退。
 
@@ -297,7 +323,7 @@ detail: name=NSUnknownKeyException
 - 结果改为边搜边显示；单个源失败不再中断整体搜索，失败原因会带上源名显示出来
 - 顺带修掉 `WebBook` 里两处 `body.data(using: .utf8)!` 强解包
 
-## 5.10 1.1 更新：本地格式 + 排版精度
+## 5.11 1.1 更新：本地格式 + 排版精度
 
 ### 本地书籍格式
 

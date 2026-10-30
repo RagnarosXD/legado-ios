@@ -611,8 +611,16 @@ class RuleEngine {
         case "text":
             return try element.text()
         case "textnodes":
-            return element.textNodes().map { $0.text() }.joined(separator: "\n")
-        case "html", "innerhtml":
+            return element.textNodes()
+                .map { $0.text().trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        case "owntext":
+            return element.textNodes().map { $0.text() }.joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        case "html":
+            return CSSParser.stripScripts(try element.outerHtml())
+        case "innerhtml":
             return try element.html()
         case "outerhtml":
             return try element.outerHtml()
@@ -757,7 +765,14 @@ class CSSParser: RuleExecutor {
             return try element.text()
 
         case "textnodes":
-            return element.textNodes().map { $0.text() }.joined(separator: "\n")
+            return element.textNodes()
+                .map { $0.text().trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+
+        case "owntext":
+            return element.textNodes().map { $0.text() }.joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
         case "html":
             // 对齐 Android AnalyzeByJSoup：@html = 删除 script/style 后的 outerHtml

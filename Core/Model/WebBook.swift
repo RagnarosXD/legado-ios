@@ -583,6 +583,8 @@ class WebBook {
             book.name = value(nameRule, "name")
             book.author = value(authorRule, "author")
             book.bookUrl = value(bookUrlRule, "bookUrl")
+            // 对齐 Android：bookUrl 解析为空时回落当前页面地址（isUrl 语义）
+            if book.bookUrl.isEmpty { book.bookUrl = baseUrl }
             book.coverUrl = value(coverUrlRule, "coverUrl")
             book.intro = value(introRule, "intro")
             book.lastChapter = value(lastChapterRule, "lastChapter")

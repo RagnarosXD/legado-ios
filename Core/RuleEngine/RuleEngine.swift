@@ -105,17 +105,20 @@ class ExecutionContext {
         bridge.inject(into: context)
 
         // 注入 getVar / setVar / result
-        context.setValue({ [weak owner] (key: String) -> String in
+        // 必须显式声明为 @convention(block)：直接传 Swift 闭包给 setObject 不会被桥接成 JS function
+        let getVarBlock: @convention(block) (String) -> String = { [weak owner] key in
             owner?.variables[key] ?? ""
-        }, forKey: "getVar")
-
-        context.setValue({ [weak owner] (key: String, value: String) in
+        }
+        let setVarBlock: @convention(block) (String, String) -> Void = { [weak owner] key, value in
             owner?.variables[key] = value
-        }, forKey: "setVar")
+        }
+        let resultBlock: @convention(block) () -> String = { [weak owner] in
+            owner?.lastResult.string ?? ""
+        }
 
-        context.setValue({ [weak owner] () -> String? in
-            owner?.lastResult.string
-        }, forKey: "result")
+        context.setObject(getVarBlock, forKeyedSubscript: "getVar" as NSString)
+        context.setObject(setVarBlock, forKeyedSubscript: "setVar" as NSString)
+        context.setObject(resultBlock, forKeyedSubscript: "result" as NSString)
 
         return context
     }
@@ -936,8 +939,8 @@ class JavaScriptParser: RuleExecutor {
             throw RuleError.executionFailed("JavaScript 引擎初始化失败（内存不足或被系统限制）")
         }
 
-        jsContext.setValue(context.lastResult.string, forKey: "result")
-        jsContext.setValue(context.baseURL?.absoluteString, forKey: "baseUrl")
+        jsContext.setObject(context.lastResult.string ?? "", forKeyedSubscript: "result" as NSString)
+        jsContext.setObject(context.baseURL?.absoluteString ?? "", forKeyedSubscript: "baseUrl" as NSString)
 
         let jsValue = jsContext.evaluateScript(jsCode)
         

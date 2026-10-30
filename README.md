@@ -88,7 +88,33 @@
 | 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 1.2.4：定位到 `searchUrl = @js:` 的源
+## 5. 1.2.5：真正根因——JSContext 注入方式错误
+
+1.2.4 的崩溃报告终于带回了调用栈：
+
+```
+kind: NSException
+detail: name=NSUnknownKeyException
+        reason=[<JSContext 0x...> setValue:forUndefinedKey:]:
+        this class is not key value coding-compliant for the key java.
+
+4  Legado  JSBridge.injectJavaObject(into: JSContext)
+5  Legado  ExecutionContext.makeJSContext(owner:)
+7  Legado  JavaScriptParser.execute
+12 Legado  WebBook.searchBook
+```
+
+**根因**：注入 JS 全局对象时用的是 KVC 的 `jsContext.setValue(obj, forKey: "java")`。`JSContext` 不实现 KVC，调用会抛 `NSUnknownKeyException`，是**必崩**的。所以只要某个书源触发了 JS 规则（`@js:`、`<js>`、`{{js...}}`、以及搜索 URL 用脚本生成），就会在注入阶段炸掉——和 `@js:` 语法、书源类型都无关。
+
+之前几轮没定位到，是因为崩溃发生在「第一次执行 JS 规则」时，而日志异步写盘丢掉了那段，崩溃报告也因合并逻辑缺陷从未出现。
+
+1.2.5 修复：
+
+- 12 处 JSContext 注入全部改成 `setObject(_:forKeyedSubscript:)`（`java` / `source` / `cookie` / `getVar` / `setVar` / `result` / `baseUrl` / 四个 source 字段）
+- `getVar` / `setVar` / `result` 的 Swift 闭包显式声明为 `@convention(block)`，否则不会被桥接成 JS function
+- 向 JS 传可选字符串时统一 `?? ""`，避免 Optional 被包成对象
+
+## 5.1 1.2.4：定位到 `searchUrl = @js:` 的源
 
 1.2.3 的日志终于给出了确切位置：
 
@@ -113,7 +139,7 @@
 
 原来的判断是「上次启动 3 秒内退出才算异常」，而崩溃都发生在启动 3 秒之后，所以重启时被当成正常退出，`crash-*.log` 永远不合并进主日志。1.2.4 改为**按文件去重**：只要有没导入过的 `crash-*.log` 就合并，并写入 `===== 崩溃报告 xxx =====`。
 
-## 5.1 1.2.3：让日志能真正定位崩溃
+## 5.2 1.2.3：让日志能真正定位崩溃
 
 ### 为什么之前日志「什么都没写」
 
@@ -137,7 +163,7 @@
 - `crash-<时间戳>.log` 里有 `--- backtrace ---` 调用栈
 - 崩溃前最后一条是某个书源名 → 该源规则有问题
 
-## 5.2 1.2.2：修复删除书源闪退
+## 5.3 1.2.2：修复删除书源闪退
 
 **现象**：单个删除、批量删除书源都会闪退。
 
@@ -149,7 +175,7 @@
 - 批量删除不再循环调用单个删除
 - 同类隐患一并修掉：书架删书（`BookshelfViewModel.removeBook`）、本地书籍删书（`LocalBookViewModel.deleteBook`）也改为同步移出内存数组
 
-## 5.3 1.2.1：修复校验/搜索闪退 + 书源筛选 + 类型推断
+## 5.4 1.2.1：修复校验/搜索闪退 + 书源筛选 + 类型推断
 
 ### 崩溃根因（1.2.0 引入）
 
@@ -172,7 +198,7 @@
 - 导入/订阅时若没有声明，用**分组名 + 名称 + 域名**推断：含「有声/音频/听书/音乐/music/listen」→ 有声；含「漫画/图片/图源/cosplay/manga/comic/hentai」→ 漫画
 - 书源管理筛选菜单里提供「**重新识别书源类型**」，对已导入的历史书源批量补全
 
-## 5.4 1.2.0：书源管理与搜索重构
+## 5.5 1.2.0：书源管理与搜索重构
 
 ### 书源管理
 
@@ -192,7 +218,7 @@
 - **结果聚合**：书名与作者都相同视为同一本书，列表显示「源名 等 N 个源」，点开弹出书源选择（对标 Android 的换源入口）；只有一个源时直接加入书架
 - 保留 90 秒总时限，超时后使用已完成的结果
 
-## 5.5 1.1.4：按书源类型分流（崩溃根因）
+## 5.6 1.1.4：按书源类型分流（崩溃根因）
 
 书源 JSON 顶层有 `bookSourceType`：`0`=文本、`1`=音频（有声书）、`2`=图片（漫画）、`3`=文件。导入时已经落库（`URLSchemeHandler` / `SourceSubscriptionManager` / `SourceViewModel`），但**搜索链路只把它写进日志，没有拿它分流**——有声源、漫画源被当成文本源解析，这就是上个版本日志里崩在 `type=1` 源上的原因。
 
@@ -206,7 +232,7 @@
 
 > `bookSourceGroup` 里的「🔊有声书源」只是分组标题，不能作为判据；`bookSourceType` 才是权威声明。若某源声明 `0` 但实际是有声/漫画站，仍可能出问题——下个版本会加「解析失败自动禁用该源」的兜底。
 
-## 5.6 1.1.3：根据实测日志修复
+## 5.7 1.1.3：根据实测日志修复
 
 你提供的 `app.log` 已经把范围缩小到解析阶段：
 
@@ -232,7 +258,7 @@
 - **字段级隔离**：单个字段解析失败只记日志并返回空串，不再整源失败
 - **上次崩溃栈并入 app.log**：下次启动时把 `crash-*.log` 的调用栈写进主日志，导出一次就够
 
-## 5.7 1.1.2 更新：日志版 + 精简入口 + 版本化产物
+## 5.8 1.1.2 更新：日志版 + 精简入口 + 版本化产物
 
 ### 1) 闪退日志（重点）
 
@@ -258,7 +284,7 @@
 - Artifact：`Legado-iOS-IPA-1.1.2`、`Legado-iOS-App-1.1.2`、`Legado-xcresult-1.1.2`
 - 打包时用 tag 名覆盖 `CFBundleShortVersionString`，`CFBundleVersion` 用 CI 构建号，**IPA 内版本与 Release 标签一致**
 
-## 5.8 1.1.1 修复：搜索闪退
+## 5.9 1.1.1 修复：搜索闪退
 
 **现象**：订阅一批书源后，一搜索就闪退。
 
@@ -271,7 +297,7 @@
 - 结果改为边搜边显示；单个源失败不再中断整体搜索，失败原因会带上源名显示出来
 - 顺带修掉 `WebBook` 里两处 `body.data(using: .utf8)!` 强解包
 
-## 5.9 1.1 更新：本地格式 + 排版精度
+## 5.10 1.1 更新：本地格式 + 排版精度
 
 ### 本地书籍格式
 

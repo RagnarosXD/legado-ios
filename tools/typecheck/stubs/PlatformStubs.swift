@@ -15,6 +15,7 @@ public final class JSValue {
 public final class JSContext {
     public init?() {}
     public func setValue(_ value: Any?, forKey key: String) {}
+    public func setObject(_ object: Any?, forKeyedSubscript key: NSString) {}
     public func evaluateScript(_ script: String) -> JSValue? { nil }
 }
 

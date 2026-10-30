@@ -164,7 +164,7 @@ class JSBridge {
         javaObject?.setObject(encodeURIBlock, forKeyedSubscript: "__encodeURI" as NSString)
         javaObject?.setObject(timeFormatBlock, forKeyedSubscript: "__timeFormat" as NSString)
 
-        jsContext.setValue(javaObject, forKey: "java")
+        jsContext.setObject(javaObject, forKeyedSubscript: "java" as NSString)
 
         _ = jsContext.evaluateScript(
             """
@@ -205,7 +205,7 @@ class JSBridge {
 
     private func injectSourceObject(into jsContext: JSContext) {
         let sourceObject = JSValue(newObjectIn: jsContext)
-        jsContext.setValue(sourceObject, forKey: "source")
+        jsContext.setObject(sourceObject, forKeyedSubscript: "source" as NSString)
 
         let getSourceUrl: @convention(block) () -> String = {
             return self.context?.source?.bookSourceUrl ?? ""
@@ -223,10 +223,10 @@ class JSBridge {
             return self.context?.source?.header ?? ""
         }
 
-        jsContext.setValue(getSourceUrl, forKey: "__legado_source_bookSourceUrl")
-        jsContext.setValue(getSourceName, forKey: "__legado_source_bookSourceName")
-        jsContext.setValue(getLoginUrl, forKey: "__legado_source_loginUrl")
-        jsContext.setValue(getHeader, forKey: "__legado_source_header")
+        jsContext.setObject(getSourceUrl, forKeyedSubscript: "__legado_source_bookSourceUrl" as NSString)
+        jsContext.setObject(getSourceName, forKeyedSubscript: "__legado_source_bookSourceName" as NSString)
+        jsContext.setObject(getLoginUrl, forKeyedSubscript: "__legado_source_loginUrl" as NSString)
+        jsContext.setObject(getHeader, forKeyedSubscript: "__legado_source_header" as NSString)
 
         _ = jsContext.evaluateScript(
             """
@@ -287,7 +287,7 @@ class JSBridge {
         cookieObject?.setObject(setCookieBlock, forKeyedSubscript: "set" as NSString)
         cookieObject?.setObject(removeCookieBlock, forKeyedSubscript: "remove" as NSString)
 
-        jsContext.setValue(cookieObject, forKey: "cookie")
+        jsContext.setObject(cookieObject, forKeyedSubscript: "cookie" as NSString)
     }
 
     private func parseSourceHeaders() -> [String: String]? {

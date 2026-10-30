@@ -731,6 +731,13 @@ class XPathParser: RuleExecutor {
         let xpath = parsed.selector.isEmpty ? rule : parsed.selector
         let attr = parsed.attr
 
+        AppLogger.debug("Rule", "XPath 执行 xpath=\(xpath.prefix(160))")
+        // 非法 XPath 交给 libxml2 有可能直接崩，这里先做括号/引号配平校验
+        guard XPathParser.isSafe(xpath) else {
+            AppLogger.error("Rule", "XPath 表达式不合法，已跳过：\(xpath.prefix(200))")
+            throw RuleError.invalidRule("XPath 表达式不合法")
+        }
+
         let doc = try Kanna.HTML(html: html, encoding: .utf8)
 
         var results: [String] = []
@@ -764,6 +771,41 @@ class XPathParser: RuleExecutor {
         }
 
         return .none
+    }
+
+    /// XPath 表达式安全校验：括号/引号配平、长度限制
+    static func isSafe(_ xpath: String) -> Bool {
+        let trimmed = xpath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 2000 else { return false }
+
+        var bracketDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+
+        for char in trimmed {
+            if let current = quote {
+                if char == current { quote = nil }
+                continue
+            }
+            switch char {
+            case "'", "\"":
+                quote = char
+            case "[":
+                bracketDepth += 1
+            case "]":
+                bracketDepth -= 1
+                if bracketDepth < 0 { return false }
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+                if parenDepth < 0 { return false }
+            default:
+                break
+            }
+        }
+
+        return bracketDepth == 0 && parenDepth == 0 && quote == nil
     }
 
     /// 从节点的 outerHTML 里取属性值

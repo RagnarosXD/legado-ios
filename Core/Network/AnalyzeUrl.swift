@@ -205,7 +205,8 @@ class AnalyzeUrl {
         
         var request = URLRequest(url: url)
         request.httpMethod = analyzedUrl.method.rawValue
-        request.timeoutInterval = 30
+        // 多书源搜索时要快速失败，30 秒会让几百个源排到天荒地老
+        request.timeoutInterval = 12
         
         // 设置 headers
         for (key, value) in analyzedUrl.headers {

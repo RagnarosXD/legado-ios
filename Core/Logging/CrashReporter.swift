@@ -26,6 +26,8 @@ enum CrashReporter {
         let previousLaunchFinished = UserDefaults.standard.bool(forKey: launchFlagKey)
         if previousLaunchFinished == false {
             AppLogger.warn("Crash", "检测到上次未正常退出，日志目录：\(AppLogger.directory.lastPathComponent)")
+            // 把上次的崩溃报告（含调用栈）合并进 app.log，这样用户只导一份日志就够
+            appendLatestCrashReportToLog()
         }
         UserDefaults.standard.set(false, forKey: launchFlagKey)
 
@@ -58,6 +60,36 @@ enum CrashReporter {
     /// App 正常进入前台后标记一次，用来判断下次启动是否为异常退出
     static func markLaunchFinished() {
         UserDefaults.standard.set(true, forKey: launchFlagKey)
+    }
+
+    // MARK: - 把上次崩溃报告写进主日志
+
+    private static func appendLatestCrashReportToLog() {
+        let directory = AppLogger.directory
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+
+        let crashFiles = files
+            .filter { $0.lastPathComponent.hasPrefix("crash-") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+
+        guard let latest = crashFiles.first else {
+            AppLogger.warn("Crash", "没有崩溃报告文件：可能是被系统终止、OOM 或信号处理未触发")
+            return
+        }
+
+        guard let text = try? String(contentsOf: latest, encoding: .utf8) else {
+            AppLogger.warn("Crash", "崩溃报告读取失败：\(latest.lastPathComponent)")
+            return
+        }
+
+        AppLogger.error("Crash", "===== 上次崩溃报告 \(latest.lastPathComponent) =====")
+        for line in text.components(separatedBy: "\n").prefix(80) where !line.isEmpty {
+            AppLogger.error("Crash", line)
+        }
+        AppLogger.error("Crash", "===== 崩溃报告结束 =====")
     }
 
     // MARK: - 落盘

@@ -47,10 +47,32 @@ class WebBook {
         guard let searchUrl = source.searchUrl, !searchUrl.isEmpty else {
             throw WebBookError.noSearchUrl
         }
-        
+
+        // 有些书源的 searchUrl 整条就是规则（@js: / <js> / {{...}}），要先算出真实 URL
+        var resolvedUrl = searchUrl
+        let trimmedUrl = searchUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedUrl.hasPrefix("@js:") || trimmedUrl.hasPrefix("<js") || trimmedUrl.hasPrefix("{{") {
+            let context = ElementContext(element: "", baseUrl: source.bookSourceUrl, source: source)
+            context.variables["key"] = key
+            context.variables["page"] = String(page)
+            if let evaluated = try? ruleEngine.getString(
+                ruleStr: trimmedUrl,
+                elementContext: context,
+                baseUrl: source.bookSourceUrl
+            ) {
+                let candidate = evaluated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if candidate.hasPrefix("http") {
+                    resolvedUrl = candidate
+                    AppLogger.info("WebBook", "搜索URL 由规则生成：\(candidate.prefix(180))")
+                } else {
+                    AppLogger.warn("WebBook", "搜索URL 规则未生成合法地址：\(candidate.prefix(120))")
+                }
+            }
+        }
+
         // 1. 构建搜索 URL
         let analyzedUrl = AnalyzeUrl.analyze(
-            ruleUrl: searchUrl,
+            ruleUrl: resolvedUrl,
             key: key,
             page: page,
             baseUrl: source.bookSourceUrl,
@@ -394,34 +416,53 @@ class WebBook {
         lastChapterRule: String?,
         wordCountRule: String?
     ) throws -> [SearchBookResult] {
+        AppLogger.debug("Rule", "\(source.bookSourceName) bookList=\(bookListRule?.prefix(160) ?? "nil") bodyLen=\(body.count)")
+
         let elements = try ruleEngine.getElements(
             ruleStr: bookListRule,
             body: body,
             baseUrl: baseUrl
         )
-        
+
+        AppLogger.debug("Rule", "\(source.bookSourceName) 列表元素=\(elements.count)")
+
         var books: [SearchBookResult] = []
-        
+
         for elementCtx in elements {
             elementCtx.source = source
             var book = SearchBookResult()
             book.sourceUrl = source.bookSourceUrl
             book.sourceName = source.bookSourceName
-            
-            book.name = ruleEngine.getString(ruleStr: nameRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.author = ruleEngine.getString(ruleStr: authorRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.bookUrl = ruleEngine.getString(ruleStr: bookUrlRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.coverUrl = ruleEngine.getString(ruleStr: coverUrlRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.intro = ruleEngine.getString(ruleStr: introRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.lastChapter = ruleEngine.getString(ruleStr: lastChapterRule, elementContext: elementCtx, baseUrl: baseUrl)
-            book.wordCount = ruleEngine.getString(ruleStr: wordCountRule, elementContext: elementCtx, baseUrl: baseUrl)
-            
+
+            // 单个字段解析失败不再让整源失败：返回空串并记录是哪条规则
+            func value(_ rule: String?, _ label: String) -> String {
+                guard let rule, !rule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+                do {
+                    let text = try ruleEngine.getString(ruleStr: rule, elementContext: elementCtx, baseUrl: baseUrl)
+                    if text.isEmpty {
+                        AppLogger.debug("Rule", "\(source.bookSourceName) 字段 \(label) 为空 rule=\(rule.prefix(140))")
+                    }
+                    return text
+                } catch {
+                    AppLogger.error("Rule", "\(source.bookSourceName) 字段 \(label) 失败 rule=\(rule.prefix(140)) err=\(error)")
+                    return ""
+                }
+            }
+
+            book.name = value(nameRule, "name")
+            book.author = value(authorRule, "author")
+            book.bookUrl = value(bookUrlRule, "bookUrl")
+            book.coverUrl = value(coverUrlRule, "coverUrl")
+            book.intro = value(introRule, "intro")
+            book.lastChapter = value(lastChapterRule, "lastChapter")
+            book.wordCount = value(wordCountRule, "wordCount")
+
             // 过滤无效结果
             if !book.name.isEmpty && !book.bookUrl.isEmpty {
                 books.append(book)
             }
         }
-        
+
         return books
     }
     

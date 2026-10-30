@@ -438,15 +438,23 @@ enum JSONPathEvaluator {
         return current
     }
 
-    private static func collectRecursive(_ value: Any, key: String?, into result: inout [Any]) {
+    private static func collectRecursive(
+        _ value: Any,
+        key: String?,
+        into result: inout [Any],
+        depth: Int = 0
+    ) {
+        // 深度上限：畸形/超深 JSON 用 $.. 递归会把栈打爆
+        guard depth < 64 else { return }
+
         if let dict = value as? [String: Any] {
             for (name, child) in dict {
                 if key == nil || name == key { result.append(child) }
-                collectRecursive(child, key: key, into: &result)
+                collectRecursive(child, key: key, into: &result, depth: depth + 1)
             }
         } else if let array = value as? [Any] {
             for item in array {
-                collectRecursive(item, key: key, into: &result)
+                collectRecursive(item, key: key, into: &result, depth: depth + 1)
             }
         }
     }

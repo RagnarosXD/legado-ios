@@ -72,9 +72,16 @@ class SearchViewModel: ObservableObject {
         // 串行搜索：书源是 Core Data 对象、规则解析会创建 JavaScriptCore 上下文，
         // 两者都不允许被多个任务并发触碰。之前用 withTaskGroup 并发多源，
         // 订阅一批带 JS 规则的书源后，首次并发创建 JS VM 会直接闪退。
+        // 用户可能导入几百个源，串行搜索必须有总时长上限，否则一直转圈
+        let deadline = Date().addingTimeInterval(90)
+
         for source in enabledSources {
             if Task.isCancelled {
                 AppLogger.warn("Search", "搜索被取消")
+                break
+            }
+            if Date() > deadline {
+                AppLogger.warn("Search", "已达搜索时间上限（90s），剩余 \(enabledSources.count - merged.count) 个源未搜索")
                 break
             }
 

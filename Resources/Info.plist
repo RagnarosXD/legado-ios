@@ -17,9 +17,17 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- 书源大量使用 http，且需要加载 http 页面里的图片 -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIApplicationSceneManifest</key>

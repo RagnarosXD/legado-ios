@@ -41,19 +41,56 @@ enum CrashReporter {
             )
         }
 
-        // 信号
-        let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE]
+        // 崩溃文件预先打开：信号上下文里不能再做 FileManager / DateFormatter 之类的操作
+        crashFileDescriptor = prepareCrashFile()
+
+        // 信号：只用 async-signal-safe 的 write + backtrace_symbols_fd
+        let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
         for sig in signals {
             signal(sig) { received in
-                CrashReporter.writeReport(
-                    kind: "Signal",
-                    detail: "signal=\(CrashReporter.signalName(received))",
-                    callStack: []
-                )
+                CrashReporter.writeSignalSnapshot(received)
                 // 恢复默认处理并重新抛出，保留系统崩溃日志
                 signal(received, SIG_DFL)
                 raise(received)
             }
+        }
+    }
+
+    // MARK: - 信号快照（async-signal-safe）
+
+    private static var crashFileDescriptor: Int32 = -1
+
+    private static func prepareCrashFile() -> Int32 {
+        let directory = AppLogger.directory
+        directory.path.withCString { _ = mkdir($0, 0o755) }
+
+        let stamp = Int(Date().timeIntervalSince1970)
+        let path = directory.appendingPathComponent("crash-\(stamp).log").path
+        return path.withCString { open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644) }
+    }
+
+    private static func writeSignalSnapshot(_ sig: Int32) {
+        let fd = crashFileDescriptor
+        guard fd >= 0 else { return }
+
+        writeCString("=== Legado CRASH (signal) ===\n", to: fd)
+        writeCString(signalName(sig), to: fd)
+        writeCString("\n--- backtrace ---\n", to: fd)
+
+        // backtrace + backtrace_symbols_fd 是 async-signal-safe 的，不依赖 Swift/Foundation
+        var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 96)
+        let count = backtrace(&frames, 96)
+        if count > 0 {
+            backtrace_symbols_fd(&frames, count, fd)
+        }
+
+        writeCString("--- end ---\n", to: fd)
+        fsync(fd)
+    }
+
+    private static func writeCString(_ text: String, to fd: Int32) {
+        text.withCString { pointer in
+            _ = write(fd, pointer, strlen(pointer))
         }
     }
 

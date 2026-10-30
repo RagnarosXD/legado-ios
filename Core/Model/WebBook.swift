@@ -52,6 +52,9 @@ class WebBook {
             throw WebBookError.noSearchUrl
         }
 
+        let prepareStart = Date()
+        AppLogger.info("WebBook", "准备搜索 \(source.bookSourceName) searchUrl=\(searchUrl.prefix(180))")
+
         // 有些书源的 searchUrl 整条就是规则（@js: / <js> / {{...}}），要先算出真实 URL
         var resolvedUrl = searchUrl
         let trimmedUrl = searchUrl.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,7 +86,8 @@ class WebBook {
             source: source
         )
         
-        AppLogger.info("WebBook", "搜索URL \(analyzedUrl.url.prefix(220))")
+        let prepareCost = Int(Date().timeIntervalSince(prepareStart) * 1000)
+        AppLogger.info("WebBook", "搜索URL \(analyzedUrl.url.prefix(220)) 构建耗时=\(prepareCost)ms")
 
         // 2. 发起请求
         let (body, redirectUrl) = try await AnalyzeUrl.getResponseBody(analyzedUrl: analyzedUrl)
@@ -91,6 +95,13 @@ class WebBook {
         guard !body.isEmpty else {
             AppLogger.warn("WebBook", "搜索响应为空 \(source.bookSourceName)")
             throw WebBookError.emptyResponse
+        }
+
+        // 安全阀：超大响应在解析阶段可能卡死主线程（正则回溯/SwiftSoup 构建），直接跳过
+        let maxBodySize = 512 * 1024
+        guard body.count <= maxBodySize else {
+            AppLogger.warn("WebBook", "响应过大跳过解析 \(source.bookSourceName) chars=\(body.count)")
+            throw WebBookError.parseFailed("响应过大（\(body.count) 字符）")
         }
 
         // 3. 解析搜索结果

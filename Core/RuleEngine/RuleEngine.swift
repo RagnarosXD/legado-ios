@@ -224,7 +224,15 @@ class RuleEngine {
             throw RuleError.unsupportedRule(splitRule.rule)
         }
 
+        let startedAt = Date()
         let result = try executor.execute(splitRule.rule, context: context)
+        let cost = Int(Date().timeIntervalSince(startedAt) * 1000)
+
+        // 慢规则 / 超长规则：崩溃前能看到到底卡在哪条规则上
+        if cost > 300 || splitRule.rule.count > 500 {
+            AppLogger.warn("Rule", "慢规则 \(executor.kind.rawValue) \(cost)ms len=\(splitRule.rule.count) rule=\(splitRule.rule.prefix(140))")
+        }
+
         return try applyReplace(splitRule.replace, to: result)
     }
 

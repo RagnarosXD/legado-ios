@@ -108,12 +108,14 @@ final class AppLogger {
 
         appendMemory(text)
 
-        queue.async { [weak self] in
-            guard let self else { return }
-            guard let data = (text + "\n").data(using: .utf8) else { return }
-            self.handle?.write(data)
-            try? self.handle?.synchronize()
-            self.rotateIfNeeded()
+        guard let data = (text + "\n").data(using: .utf8) else { return }
+
+        // 同步写 + 立即 flush：之前用 queue.async，进程被系统杀掉（watchdog / OOM）时
+        // 队列里最后几秒的日志全丢了，看起来「日志太少」。日志量本身很小，同步成本可接受。
+        queue.sync {
+            handle?.write(data)
+            try? handle?.synchronize()
+            rotateIfNeeded()
         }
     }
 

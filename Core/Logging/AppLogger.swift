@@ -14,12 +14,46 @@ final class AppLogger {
 
     static let shared = AppLogger()
 
-    enum Level: String {
+    enum Level: String, CaseIterable {
         case debug = "D"
         case info = "I"
         case warn = "W"
         case error = "E"
         case crash = "C"
+
+        var rank: Int {
+            switch self {
+            case .debug: return 0
+            case .info: return 1
+            case .warn: return 2
+            case .error: return 3
+            case .crash: return 4
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .debug: return "调试"
+            case .info: return "信息"
+            case .warn: return "警告"
+            case .error: return "错误"
+            case .crash: return "崩溃"
+            }
+        }
+    }
+
+    /// 低于该级别的日志不写盘（崩溃始终记录）
+    static var minimumLevel: Level {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "logLevel"),
+                  let level = Level.allCases.first(where: { $0.title == raw || $0.rawValue == raw }) else {
+                return .debug
+            }
+            return level
+        }
+        set {
+            UserDefaults.standard.set(newValue.title, forKey: "logLevel")
+        }
     }
 
     // MARK: - 配置
@@ -105,6 +139,8 @@ final class AppLogger {
     }
 
     private func write(_ level: Level, _ tag: String, _ message: String, file: String, line: Int) {
+        guard level.rank >= Self.minimumLevel.rank else { return }
+
         let time = Self.makeFormatter().string(from: Date())
         let shortFile = (file as NSString).lastPathComponent
         let text = "\(time) [\(level.rawValue)] \(tag) \(shortFile):\(line) \(message)"
@@ -163,6 +199,31 @@ final class AppLogger {
 
             self.trimArchives(keeping: self.maxFileCount)
         }
+    }
+
+    /// 删除全部日志文件，并新建一个空文件继续记录
+    func deleteAllLogs() {
+        queue.sync {
+            handle?.closeFile()
+            handle = nil
+
+            for url in allLogFiles() {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            let url = Self.directory.appendingPathComponent(Self.makeLogFileName())
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            handle = try? FileHandle(forWritingTo: url)
+            currentURL = url
+        }
+
+        Self.warn("Log", "日志已清除")
+    }
+
+    private static func makeLogFileName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return "app-\(formatter.string(from: Date())).log"
     }
 
     /// 只保留最近 N 个日志文件

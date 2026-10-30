@@ -485,19 +485,16 @@ class BookDetailViewModel: ObservableObject {
             return currentSource
         }
 
-        guard let sourceUUID = UUID(uuidString: book.origin) else {
-            throw NSError(domain: "BookDetailViewModel", code: 1, userInfo: [NSLocalizedDescriptionKey: "未找到书源"])
-        }
-
-        let request: NSFetchRequest<BookSource> = BookSource.fetchRequest()
-        request.fetchLimit = 1
-        request.predicate = NSPredicate(format: "sourceId == %@", sourceUUID as CVarArg)
-        if let source = try context.fetch(request).first {
+        if let source = BookSourceResolver.resolve(for: book, in: context) {
             currentSource = source
             return source
         }
 
-        throw NSError(domain: "BookDetailViewModel", code: 2, userInfo: [NSLocalizedDescriptionKey: "未找到书源"])
+        throw NSError(
+            domain: "BookDetailViewModel",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "原书源已删除或不可用，请换源后重试"]
+        )
     }
 
     private func refreshChapterList(source: BookSource) async throws -> Int {

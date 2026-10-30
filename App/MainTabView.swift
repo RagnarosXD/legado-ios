@@ -110,23 +110,11 @@ struct SettingsView: View {
 
                 // 诊断
                 Section(header: Label("诊断", systemImage: "ladybug")) {
-                    ShareLink(item: AppLogger.shared.currentLogFile) {
-                        HStack {
-                            Text("导出运行日志")
-                            Spacer()
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundColor(.secondary)
-                        }
+                    NavigationLink("运行日志") {
+                        LogSettingsView()
                     }
 
-                    HStack {
-                        Text("日志文件")
-                        Spacer()
-                        Text("\(AppLogger.shared.allLogFiles().count) 个")
-                            .foregroundColor(.secondary)
-                    }
-
-                    Text("闪退后重新打开 App，在「导出日志」里分享最新文件即可定位问题。")
+                    Text("闪退后重新打开 App，在「运行日志」里点最新文件分享即可定位问题；可在同一页面调整日志级别或清除日志。")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }

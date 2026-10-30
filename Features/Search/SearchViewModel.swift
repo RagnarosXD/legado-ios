@@ -159,6 +159,9 @@ class SearchViewModel: ObservableObject {
         rebuildMergedResults()
         AppLogger.info("Search", "搜索结束 结果=\(collected.count) 聚合=\(mergedResults.count) 失败源=\(failures.count)")
 
+        // 把「这本书在哪些源里命中过」存下来，换源时不必重新全量搜索
+        persistSourceCache()
+
         if collected.isEmpty {
             if enabledSources.isEmpty, skippedCount > 0 {
                 errorMessage = "启用的书源都是有声/漫画/图片类型（\(skippedCount) 个），当前版本只支持电子书文本源。"
@@ -249,6 +252,32 @@ class SearchViewModel: ObservableObject {
         }
 
         mergedResults = order.compactMap { buckets[$0] }
+    }
+
+    /// 命中结果写入换源缓存
+    private func persistSourceCache() {
+        guard !mergedResults.isEmpty else { return }
+
+        var urlById: [UUID: String] = [:]
+        for source in selectedSources {
+            urlById[source.sourceId] = source.bookSourceUrl
+        }
+
+        for merged in mergedResults {
+            let hits = merged.entries.compactMap { entry -> CachedSourceHit? in
+                guard !entry.bookUrl.isEmpty else { return nil }
+                return CachedSourceHit(
+                    sourceId: entry.sourceId,
+                    sourceName: entry.sourceName,
+                    sourceUrl: urlById[entry.sourceId] ?? "",
+                    bookUrl: entry.bookUrl,
+                    coverUrl: entry.coverUrl,
+                    intro: entry.intro,
+                    cachedAt: Date()
+                )
+            }
+            SearchSourceCache.shared.save(name: merged.name, author: merged.author, hits: hits)
+        }
     }
 
     /// 用户设置的搜索并发数（设置页写入）

@@ -248,14 +248,9 @@ class ReaderViewModel: ObservableObject {
         var chapters = try context.fetch(request)
 
         if chapters.isEmpty, !book.isLocal {
-            guard let sourceId = UUID(uuidString: book.origin) else {
-                throw ReaderError.noSource
-            }
-
-            let sourceRequest: NSFetchRequest<BookSource> = BookSource.fetchRequest()
-            sourceRequest.fetchLimit = 1
-            sourceRequest.predicate = NSPredicate(format: "sourceId == %@", sourceId as CVarArg)
-            guard let source = try context.fetch(sourceRequest).first else {
+            // 关系 / origin(sourceId) / origin(URL) / 源名，逐级尝试，避免单个线索缺失就报「未找到书源」
+            guard let source = BookSourceResolver.resolve(for: book, in: context) else {
+                AppLogger.error("Reader", "无法解析书源 book=\(book.name) origin=\(book.origin) originName=\(book.originName)")
                 throw ReaderError.noSource
             }
 
@@ -642,7 +637,7 @@ enum ReaderError: LocalizedError {
         case .notCached: return "章节未缓存"
         case .networkFailure: return "网络加载失败"
         case .noBook: return "未找到书籍"
-        case .noSource: return "未找到书源"
+        case .noSource: return "原书源已删除或不可用，请换源后重试"
         case .parseFailed(let reason): return "解析失败：\(reason)"
         }
     }

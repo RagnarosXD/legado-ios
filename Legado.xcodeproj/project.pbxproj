@@ -129,6 +129,9 @@
 		1A00000000000096 /* SourceBatchController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000096 /* SourceBatchController.swift */; };
 		1A00000000000097 /* SourceCheckSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000097 /* SourceCheckSheet.swift */; };
 		1A00000000000098 /* SearchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000098 /* SearchSettingsView.swift */; };
+		1A00000000000099 /* BookSourceResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000099 /* BookSourceResolver.swift */; };
+		1A0000000000009A /* SearchSourceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1000000000009A /* SearchSourceCache.swift */; };
+		1A0000000000009B /* LogSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1000000000009B /* LogSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -253,6 +256,9 @@
 		1A10000000000096 /* SourceBatchController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Source/SourceBatchController.swift"; sourceTree = "<group>"; };
 		1A10000000000097 /* SourceCheckSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../Features/Source/SourceCheckSheet.swift"; sourceTree = "<group>"; };
 		1A10000000000098 /* SearchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../Features/Search/SearchSettingsView.swift"; sourceTree = "<group>"; };
+		1A10000000000099 /* BookSourceResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Persistence/BookSourceResolver.swift"; sourceTree = "<group>"; };
+		1A1000000000009A /* SearchSourceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Search/SearchSourceCache.swift"; sourceTree = "<group>"; };
+		1A1000000000009B /* LogSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../Features/Settings/LogSettingsView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -418,6 +424,9 @@
 				1A10000000000096 /* SourceBatchController.swift */,
 				1A10000000000097 /* SourceCheckSheet.swift */,
 				1A10000000000098 /* SearchSettingsView.swift */,
+				1A10000000000099 /* BookSourceResolver.swift */,
+				1A1000000000009A /* SearchSourceCache.swift */,
+				1A1000000000009B /* LogSettingsView.swift */,
 				1A10000000000080 /* TableOfContentsParser.swift */,
 			);
 			path = Parser;
@@ -697,6 +706,9 @@
 				1A00000000000096 /* SourceBatchController.swift in Sources */,
 				1A00000000000097 /* SourceCheckSheet.swift in Sources */,
 				1A00000000000098 /* SearchSettingsView.swift in Sources */,
+				1A00000000000099 /* BookSourceResolver.swift in Sources */,
+				1A0000000000009A /* SearchSourceCache.swift in Sources */,
+				1A0000000000009B /* LogSettingsView.swift in Sources */,
 				1A00000000000047 /* TemplateEngine.swift in Sources */,
 				1A00000000000048 /* JSBridge.swift in Sources */,
 				1A0000000000006B /* SearchOptimizer.swift in Sources */,
@@ -953,7 +965,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -970,7 +982,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7;
+				MARKETING_VERSION = 1.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -986,7 +998,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1003,7 +1015,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7;
+				MARKETING_VERSION = 1.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

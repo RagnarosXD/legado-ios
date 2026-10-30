@@ -81,9 +81,23 @@ extension BookSource {
     var isAudio: Bool {
         bookSourceType == 1
     }
-    
+
     var isImage: Bool {
         bookSourceType == 2
+    }
+
+    /// 当前版本只实现了文本（电子书）阅读，只有 type=0 的源能参与搜索/解析
+    var supportsTextSearch: Bool {
+        bookSourceType == 0
+    }
+
+    var typeDisplayName: String {
+        switch bookSourceType {
+        case 1: return "有声"
+        case 2: return "漫画"
+        case 3: return "文件"
+        default: return "文本"
+        }
     }
     
     var isValid: Bool {

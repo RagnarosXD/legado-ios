@@ -63,11 +63,18 @@ class SearchViewModel: ObservableObject {
         searchResults.removeAll()
         errorMessage = nil
 
-        let enabledSources = sources.filter { $0.enabled && $0.searchUrl != nil }
+        let allEnabled = sources.filter { $0.enabled && $0.searchUrl != nil }
+        // 本版本只有文本阅读器：有声/漫画/图片源的响应结构完全不同，混进文本解析会崩
+        let enabledSources = allEnabled.filter { $0.supportsTextSearch }
+        let skippedCount = allEnabled.count - enabledSources.count
+        if skippedCount > 0 {
+            AppLogger.warn("Search", "跳过 \(skippedCount) 个非文本书源（有声/漫画/图片），本版本仅支持电子书文本源")
+        }
+
         var merged: [SearchResult] = []
         var failures: [String] = []
 
-        AppLogger.info("Search", "开始搜索 keyword=\(keyword) 书源数=\(enabledSources.count)")
+        AppLogger.info("Search", "开始搜索 keyword=\(keyword) 文本源=\(enabledSources.count) 跳过=\(skippedCount)")
 
         // 串行搜索：书源是 Core Data 对象、规则解析会创建 JavaScriptCore 上下文，
         // 两者都不允许被多个任务并发触碰。之前用 withTaskGroup 并发多源，
@@ -109,9 +116,13 @@ class SearchViewModel: ObservableObject {
 
         AppLogger.info("Search", "搜索结束 结果=\(merged.count) 失败源=\(failures.count)")
 
-        if merged.isEmpty, !failures.isEmpty {
-            let preview = failures.prefix(3).joined(separator: "\n")
-            errorMessage = "没有搜索到结果，失败原因：\n\(preview)"
+        if merged.isEmpty {
+            if enabledSources.isEmpty, skippedCount > 0 {
+                errorMessage = "启用的书源都是有声/漫画/图片类型（\(skippedCount) 个），当前版本只支持电子书文本源。"
+            } else if !failures.isEmpty {
+                let preview = failures.prefix(3).joined(separator: "\n")
+                errorMessage = "没有搜索到结果，失败原因：\n\(preview)"
+            }
         }
 
         isSearching = false

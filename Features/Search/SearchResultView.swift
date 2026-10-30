@@ -137,14 +137,29 @@ struct SourcePickerView: View {
                 ForEach(sources, id: \.sourceId) { source in
                     HStack {
                         Text(source.displayName)
-                        
+
+                        if !source.supportsTextSearch {
+                            Text(source.typeDisplayName)
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundColor(.orange)
+                                .cornerRadius(4)
+                        }
+
                         Spacer()
-                        
-                        if selectedSources.contains(where: { $0.sourceId == source.sourceId }) {
+
+                        if !source.supportsTextSearch {
+                            Text("本版本不支持")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        } else if selectedSources.contains(where: { $0.sourceId == source.sourceId }) {
                             Image(systemName: "checkmark")
                                 .foregroundColor(.blue)
                         }
                     }
+                    .opacity(source.supportsTextSearch ? 1 : 0.5)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         toggleSource(source)
@@ -174,6 +189,9 @@ struct SourcePickerView: View {
     }
     
     private func toggleSource(_ source: BookSource) {
+        // 有声/漫画源不参与搜索，避免用文本解析器处理它们而崩溃
+        guard source.supportsTextSearch else { return }
+
         if let index = selectedSources.firstIndex(where: { $0.sourceId == source.sourceId }) {
             selectedSources.remove(at: index)
         } else {

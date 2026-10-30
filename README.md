@@ -88,7 +88,21 @@
 | 漫画阅读 | ⚠️ CBZ 按页纵向看图，实验性 |
 | 云端/多设备同步（除 WebDAV） | ❌ 未实现 |
 
-## 5. 1.1.3：根据实测日志修复
+## 5. 1.1.4：按书源类型分流（崩溃根因）
+
+书源 JSON 顶层有 `bookSourceType`：`0`=文本、`1`=音频（有声书）、`2`=图片（漫画）、`3`=文件。导入时已经落库（`URLSchemeHandler` / `SourceSubscriptionManager` / `SourceViewModel`），但**搜索链路只把它写进日志，没有拿它分流**——有声源、漫画源被当成文本源解析，这就是上个版本日志里崩在 `type=1` 源上的原因。
+
+1.1.4 起：
+
+- 搜索只跑 `bookSourceType == 0` 的源，其余直接跳过（不请求、不解析、不创建 JS 上下文）
+- 日志记录 `跳过 N 个非文本书源（有声/漫画/图片）`
+- 若启用的源全是非文本类型，提示「当前版本只支持电子书文本源」
+- 书源选择器里给非文本源打上「有声 / 漫画 / 文件」标签并置灰，点击无效
+- 书源管理列表沿用类型图标（🎧 / 🖼）
+
+> `bookSourceGroup` 里的「🔊有声书源」只是分组标题，不能作为判据；`bookSourceType` 才是权威声明。若某源声明 `0` 但实际是有声/漫画站，仍可能出问题——下个版本会加「解析失败自动禁用该源」的兜底。
+
+## 5.1 1.1.3：根据实测日志修复
 
 你提供的 `app.log` 已经把范围缩小到解析阶段：
 
@@ -114,7 +128,7 @@
 - **字段级隔离**：单个字段解析失败只记日志并返回空串，不再整源失败
 - **上次崩溃栈并入 app.log**：下次启动时把 `crash-*.log` 的调用栈写进主日志，导出一次就够
 
-## 5.1 1.1.2 更新：日志版 + 精简入口 + 版本化产物
+## 5.2 1.1.2 更新：日志版 + 精简入口 + 版本化产物
 
 ### 1) 闪退日志（重点）
 
@@ -140,7 +154,7 @@
 - Artifact：`Legado-iOS-IPA-1.1.2`、`Legado-iOS-App-1.1.2`、`Legado-xcresult-1.1.2`
 - 打包时用 tag 名覆盖 `CFBundleShortVersionString`，`CFBundleVersion` 用 CI 构建号，**IPA 内版本与 Release 标签一致**
 
-## 5.2 1.1.1 修复：搜索闪退
+## 5.3 1.1.1 修复：搜索闪退
 
 **现象**：订阅一批书源后，一搜索就闪退。
 
@@ -153,7 +167,7 @@
 - 结果改为边搜边显示；单个源失败不再中断整体搜索，失败原因会带上源名显示出来
 - 顺带修掉 `WebBook` 里两处 `body.data(using: .utf8)!` 强解包
 
-## 5.3 1.1 更新：本地格式 + 排版精度
+## 5.4 1.1 更新：本地格式 + 排版精度
 
 ### 本地书籍格式
 
@@ -223,7 +237,7 @@ python tools/check_swift_balance.py Core
 - **CBZ 漫画**：按页纵向阅读，暂无双页/左右翻页/预加载。
 - **合规**：本项目不含任何书籍内容、不内置书源；请只导入你有权使用的内容。
 
-## 7. 技术栈
+## 8. 技术栈
 
 - UI：SwiftUI + UIKit（阅读器）
 - 架构：MVVM
@@ -231,12 +245,12 @@ python tools/check_swift_balance.py Core
 - 网络：URLSession（含 GBK/Big5 编码探测、WKWebView 兜底）
 - HTML：SwiftSoup｜XPath：Kanna｜JS：JavaScriptCore｜ZIP：ZIPFoundation
 
-## 8. 链接
+## 9. 链接
 
 - 原项目：[gedoor/legado](https://github.com/gedoor/legado) / [LegadoTeam/legado](https://github.com/LegadoTeam/legado)
 - 帮助文档：<https://www.legado.top/>
 - 书源规则教程：<https://mgz0227.github.io/The-tutorial-of-Legado/>
 
-## 9. 免责声明
+## 10. 免责声明
 
 仅供学习交流，请勿用于商业用途；使用时请遵守当地法律法规并尊重版权。

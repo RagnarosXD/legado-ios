@@ -331,7 +331,8 @@ class WebBook {
                 if chapters.count > 10000 { break }
             }
         }
-        
+
+        AppLogger.info("WebBook", "目录解析 \(source.bookSourceName) 章节=\(chapters.count)")
         return chapters
     }
     

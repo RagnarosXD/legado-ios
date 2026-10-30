@@ -589,6 +589,50 @@ class ReaderViewModel: ObservableObject {
         return result.chapters[index].content
     }
     
+    // MARK: - 缓存全部章节
+
+    @Published var isCachingAll = false
+    @Published var cacheCompleted = 0
+    @Published var cacheTotal = 0
+
+    /// 逐章抓取并写入缓存，跳过已缓存的章节
+    func cacheAllChapters() async {
+        guard !isCachingAll, let book = currentBook else { return }
+
+        let pending = chapters.filter { !$0.isCached }
+        guard !pending.isEmpty else {
+            errorMessage = "全部章节已缓存"
+            return
+        }
+
+        let context = CoreDataStack.shared.viewContext
+        guard let source = BookSourceResolver.resolve(for: book, in: context) else {
+            errorMessage = "原书源已删除或不可用，无法缓存"
+            return
+        }
+
+        isCachingAll = true
+        cacheTotal = pending.count
+        cacheCompleted = 0
+
+        AppLogger.info("Cache", "开始缓存全书 \(book.name) 待缓存=\(pending.count)")
+
+        for chapter in pending {
+            if Task.isCancelled { break }
+            do {
+                let content = try await WebBook.getContent(source: source, book: book, chapter: chapter)
+                try await cacheChapter(chapter, content: content)
+                cacheCompleted += 1
+            } catch {
+                AppLogger.warn("Cache", "缓存失败 \(chapter.title)：\(error)")
+            }
+        }
+
+        try? context.save()
+        isCachingAll = false
+        AppLogger.info("Cache", "缓存结束 \(cacheCompleted)/\(cacheTotal)")
+    }
+
     private func cacheChapter(_ chapter: BookChapter, content: String) async throws {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let chapterDir = documents.appendingPathComponent("chapters", isDirectory: true)

@@ -51,6 +51,11 @@ final class CoreTextPageUIView: UIView {
 
         context.saveGState()
         context.textMatrix = .identity
+        // UIKit 的 draw 坐标系是「原点左上、y 向下」，CoreText 用的是「原点左下、y 向上」。
+        // 这里必须先翻转一次，否则整页文字会上下颠倒（与屏幕成 180° 中心对称）。
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+
         let path = CGPath(rect: area, transform: nil)
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nil)

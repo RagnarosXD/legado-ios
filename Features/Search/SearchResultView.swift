@@ -13,38 +13,51 @@ struct SearchResultView: View {
     @State private var navigatingToBookDetail = false
     @State private var selectedBook: Book?
     @State private var openingResultId: UUID?
-    
+    @State private var choosingMerged: SearchViewModel.MergedSearchResult?
+
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
+            // 搜索进度：已搜索书源数 / 书源总数
             if viewModel.isSearching {
-                ProgressView("搜索中...")
-                    .padding()
-            } else if viewModel.searchResults.isEmpty {
-                EmptyStateView(
-                    title: "搜索结果",
-                    subtitle: "输入关键词搜索书籍",
-                    imageName: "magnifyingglass"
-                )
+                VStack(spacing: 6) {
+                    ProgressView(value: viewModel.progress)
+                        .progressViewStyle(.linear)
+                    HStack {
+                        Text("已搜索 \(viewModel.searchedSourceCount)/\(viewModel.totalSourceCount) 个书源")
+                        Spacer()
+                        Text("\(Int(viewModel.progress * 100))%")
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+
+            if viewModel.mergedResults.isEmpty {
+                if viewModel.isSearching {
+                    Spacer()
+                } else {
+                    EmptyStateView(
+                        title: "搜索结果",
+                        subtitle: "输入关键词搜索书籍",
+                        imageName: "magnifyingglass"
+                    )
+                }
             } else {
-                List(viewModel.searchResults) { result in
+                List(viewModel.mergedResults) { merged in
                     Button {
-                        guard openingResultId == nil else { return }
-                        openingResultId = result.id
-                        Task {
-                            defer { openingResultId = nil }
-                            do {
-                                selectedBook = try await viewModel.addToBookshelf(result: result)
-                                navigatingToBookDetail = true
-                            } catch {
-                                viewModel.errorMessage = "加入书架失败：\(error.localizedDescription)"
-                            }
-                        }
+                        handleTap(merged)
                     } label: {
-                        SearchResultItemView(result: result)
+                        SearchResultItemView(
+                            result: merged.entries[0],
+                            sourceCount: merged.entries.count
+                        )
                     }
                     .buttonStyle(.plain)
-                    .disabled(openingResultId == result.id)
+                    .disabled(merged.primary.map { openingResultId == $0.id } ?? false)
                 }
+                .listStyle(.plain)
             }
         }
         .navigationTitle("搜索")
@@ -71,7 +84,7 @@ struct SearchResultView: View {
                 Text("未找到书籍")
             }
         }
-        .alert("操作失败", isPresented: Binding(
+        .alert("提示", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) {
@@ -81,12 +94,62 @@ struct SearchResultView: View {
         } message: {
             Text(viewModel.errorMessage ?? "未知错误")
         }
+        .confirmationDialog(
+            "选择书源",
+            isPresented: Binding(
+                get: { choosingMerged != nil },
+                set: { if !$0 { choosingMerged = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let merged = choosingMerged {
+                ForEach(merged.entries, id: \.id) { entry in
+                    Button(entry.sourceName) {
+                        open(entry)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let merged = choosingMerged {
+                Text("《\(merged.name)》在 \(merged.entries.count) 个书源里都有，选一个加入书架")
+            }
+        }
+    }
+
+    // MARK: - 交互
+
+    private func handleTap(_ merged: SearchViewModel.MergedSearchResult) {
+        guard let primary = merged.primary else { return }
+        // 多书源时让用户选择（对标 Android 的「换源」入口）
+        if merged.entries.count > 1 {
+            choosingMerged = merged
+        } else {
+            open(primary)
+        }
+    }
+
+    private func open(_ result: SearchViewModel.SearchResult) {
+        guard openingResultId == nil else { return }
+        choosingMerged = nil
+        openingResultId = result.id
+
+        Task {
+            defer { openingResultId = nil }
+            do {
+                selectedBook = try await viewModel.addToBookshelf(result: result)
+                navigatingToBookDetail = true
+            } catch {
+                viewModel.errorMessage = "加入书架失败：\(error.localizedDescription)"
+            }
+        }
     }
 }
 
 struct SearchResultItemView: View {
     let result: SearchViewModel.SearchResult
-    
+    var sourceCount: Int = 1
+
     var body: some View {
         HStack(spacing: 12) {
             // 封面
@@ -107,10 +170,19 @@ struct SearchResultItemView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                // 书源
-                Text(result.sourceName)
-                    .font(.caption2)
-                    .foregroundColor(.blue)
+                // 书源（聚合后显示来源数量）
+                HStack(spacing: 4) {
+                    Text(result.sourceName)
+                    if sourceCount > 1 {
+                        Text("等 \(sourceCount) 个源")
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.12))
+                            .cornerRadius(3)
+                    }
+                }
+                .font(.caption2)
+                .foregroundColor(.blue)
                 
                 // 简介
                 if let intro = result.intro {

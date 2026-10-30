@@ -125,6 +125,10 @@
 		1A00000000000092 /* PageTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000092 /* PageTextView.swift */; };
 		1A00000000000093 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000093 /* AppLogger.swift */; };
 		1A00000000000094 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000094 /* CrashReporter.swift */; };
+		1A00000000000095 /* SourceValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000095 /* SourceValidator.swift */; };
+		1A00000000000096 /* SourceBatchController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000096 /* SourceBatchController.swift */; };
+		1A00000000000097 /* SourceCheckSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000097 /* SourceCheckSheet.swift */; };
+		1A00000000000098 /* SearchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A10000000000098 /* SearchSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -245,6 +249,10 @@
 		1A10000000000092 /* PageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PageViews/PageTextView.swift"; sourceTree = "<group>"; };
 		1A10000000000093 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Logging/AppLogger.swift"; sourceTree = "<group>"; };
 		1A10000000000094 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Logging/CrashReporter.swift"; sourceTree = "<group>"; };
+		1A10000000000095 /* SourceValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Source/SourceValidator.swift"; sourceTree = "<group>"; };
+		1A10000000000096 /* SourceBatchController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Source/SourceBatchController.swift"; sourceTree = "<group>"; };
+		1A10000000000097 /* SourceCheckSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../Features/Source/SourceCheckSheet.swift"; sourceTree = "<group>"; };
+		1A10000000000098 /* SearchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../Features/Search/SearchSettingsView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -406,6 +414,10 @@
 				1A10000000000091 /* LocalBookBinaryFormats.swift */,
 				1A10000000000093 /* AppLogger.swift */,
 				1A10000000000094 /* CrashReporter.swift */,
+				1A10000000000095 /* SourceValidator.swift */,
+				1A10000000000096 /* SourceBatchController.swift */,
+				1A10000000000097 /* SourceCheckSheet.swift */,
+				1A10000000000098 /* SearchSettingsView.swift */,
 				1A10000000000080 /* TableOfContentsParser.swift */,
 			);
 			path = Parser;
@@ -681,6 +693,10 @@
 				1A00000000000092 /* PageTextView.swift in Sources */,
 				1A00000000000093 /* AppLogger.swift in Sources */,
 				1A00000000000094 /* CrashReporter.swift in Sources */,
+				1A00000000000095 /* SourceValidator.swift in Sources */,
+				1A00000000000096 /* SourceBatchController.swift in Sources */,
+				1A00000000000097 /* SourceCheckSheet.swift in Sources */,
+				1A00000000000098 /* SearchSettingsView.swift in Sources */,
 				1A00000000000047 /* TemplateEngine.swift in Sources */,
 				1A00000000000048 /* JSBridge.swift in Sources */,
 				1A0000000000006B /* SearchOptimizer.swift in Sources */,
@@ -937,7 +953,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -954,7 +970,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.4;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -970,7 +986,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODEGEN_SKIP_MODEL_CLASSES = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -987,7 +1003,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.4;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.legado.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

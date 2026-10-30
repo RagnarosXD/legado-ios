@@ -100,7 +100,14 @@ struct SettingsView: View {
                         }
                     }
                 }
-                
+
+                // 搜索
+                Section(header: Label("搜索", systemImage: "magnifyingglass")) {
+                    NavigationLink("搜索设置") {
+                        SearchSettingsView()
+                    }
+                }
+
                 // 诊断
                 Section(header: Label("诊断", systemImage: "ladybug")) {
                     ShareLink(item: AppLogger.shared.currentLogFile) {

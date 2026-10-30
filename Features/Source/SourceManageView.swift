@@ -19,6 +19,11 @@ struct SourceManageView: View {
     // 批量操作状态
     @State private var isEditMode = false
     @State private var selectedSources: Set<UUID> = []
+
+    // 批量校验
+    @StateObject private var batch = SourceBatchController()
+    @State private var showingCheckResults = false
+    @AppStorage("searchConcurrency") private var concurrency: Int = 4
     
     @State private var showingExporter = false
     @State private var exportDocument = JSONDataDocument()
@@ -34,39 +39,11 @@ struct SourceManageView: View {
                         imageName: "square.grid.2x2"
                     )
                 } else {
-                    ForEach(viewModel.sources, id: \.sourceId) { source in
-                        SourceItemView(
-                            source: source,
-                            isSelected: selectedSources.contains(source.sourceId),
-                            isEditMode: isEditMode
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if isEditMode {
-                                toggleSelection(source.sourceId)
-                            }
-                        }
-                        .swipeActions {
-                            if !isEditMode {
-                                Button(role: .destructive) {
-                                    viewModel.deleteSource(source)
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                                
-                                Button {
-                                    editViewModel = SourceEditViewModel(source: source)
-                                    showingEdit = true
-                                } label: {
-                                    Label("编辑", systemImage: "pencil")
-                                }
-                                .tint(.blue)
-                            }
-                        }
-                    }
-                    .onDelete { indexSet in
-                        viewModel.deleteSources(at: indexSet)
-                    }
+                    // 按书源自带声明的 bookSourceType 分类，不同类型不混排
+                    sourceSection(.text)
+                    sourceSection(.audio)
+                    sourceSection(.image)
+                    sourceSection(.file)
                 }
             }
             .listStyle(.insetGrouped)
@@ -143,7 +120,10 @@ struct SourceManageView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "未知错误")
             }
-            
+            .sheet(isPresented: $showingCheckResults) {
+                SourceCheckSheet(batch: batch, sources: viewModel.sources)
+            }
+
             // MARK: - 底部批量操作栏
             if isEditMode && !viewModel.sources.isEmpty {
                 VStack {
@@ -155,13 +135,90 @@ struct SourceManageView: View {
                         onSelectAll: selectAll,
                         onEnable: { batchEnable(true) },
                         onDisable: { batchEnable(false) },
+                        onValidate: validateSelected,
                         onDelete: batchDelete
                     )
                 }
             }
+
+            // 校验进度
+            if batch.isChecking {
+                VStack(spacing: 10) {
+                    ProgressView(value: batch.progress)
+                        .frame(width: 180)
+                    Text("校验中 \(batch.checkedCount)/\(batch.totalCount)")
+                        .font(.caption)
+                }
+                .padding(18)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
         }
     }
     
+    // MARK: - 分组渲染
+
+    /// 按 bookSourceType 分组，不同类型互不混排
+    @ViewBuilder
+    private func sourceSection(_ section: SourceTypeSection) -> some View {
+        let items = viewModel.sources.filter { $0.bookSourceType == section.rawValue }
+        if !items.isEmpty {
+            Section {
+                ForEach(items, id: \.sourceId) { source in
+                    sourceRow(source)
+                }
+            } header: {
+                HStack {
+                    Text(section.title)
+                    Spacer()
+                    Text("\(items.count)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sourceRow(_ source: BookSource) -> some View {
+        SourceItemView(
+            source: source,
+            isSelected: selectedSources.contains(source.sourceId),
+            isEditMode: isEditMode
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isEditMode {
+                toggleSelection(source.sourceId)
+            }
+        }
+        .swipeActions {
+            if !isEditMode {
+                Button(role: .destructive) {
+                    viewModel.deleteSource(source)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+
+                Button {
+                    editViewModel = SourceEditViewModel(source: source)
+                    showingEdit = true
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+        }
+    }
+
+    // MARK: - 批量校验
+
+    private func validateSelected() {
+        let targets = viewModel.sources.filter { selectedSources.contains($0.sourceId) }
+        guard !targets.isEmpty else { return }
+        showingCheckResults = true
+        Task {
+            await batch.validate(targets, concurrency: concurrency)
+        }
+    }
+
     private func toggleSelection(_ id: UUID) {
         if selectedSources.contains(id) {
             selectedSources.remove(id)
@@ -219,6 +276,7 @@ struct BatchActionBar: View {
     let onSelectAll: () -> Void
     let onEnable: () -> Void
     let onDisable: () -> Void
+    let onValidate: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
@@ -265,10 +323,26 @@ struct BatchActionBar: View {
             }
             .disabled(selectedCount == 0)
             .opacity(selectedCount == 0 ? 0.5 : 1)
-            
+
             Divider()
                 .frame(height: 40)
-            
+
+            // 校验
+            Button(action: onValidate) {
+                VStack(spacing: 2) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.title3)
+                    Text("校验")
+                        .font(.caption2)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .disabled(selectedCount == 0)
+            .opacity(selectedCount == 0 ? 0.5 : 1)
+
+            Divider()
+                .frame(height: 40)
+
             // 删除
             Button(action: onDelete) {
                 VStack(spacing: 2) {
@@ -423,4 +497,23 @@ struct SourceImportView: View {
 
 #Preview {
     SourceManageView()
+}
+
+
+// MARK: - 书源类型分组
+
+enum SourceTypeSection: Int32, CaseIterable {
+    case text = 0
+    case audio = 1
+    case image = 2
+    case file = 3
+
+    var title: String {
+        switch self {
+        case .text: return "文本"
+        case .audio: return "有声"
+        case .image: return "漫画"
+        case .file: return "文件"
+        }
+    }
 }

@@ -213,10 +213,21 @@ class AnalyzeUrl {
         analyzedUrl: AnalyzedUrl,
         charset: String.Encoding = .utf8
     ) async throws -> (body: String, url: String) {
-        guard let url = URL(string: analyzedUrl.url) else {
-            throw URLError(.badURL)
+        // 章节地址常带中文/空格/换行（书源规则直接拼出来的），URL(string:) 会返回 nil，
+        // 表现为 NSURLErrorDomain -1000；这里先原样解析，失败再补百分号编码重试
+        let url: URL
+        if let direct = URL(string: analyzedUrl.url) {
+            url = direct
+        } else {
+            let encoded = encodeIfNeeded(analyzedUrl.url)
+            guard let retried = URL(string: encoded) else {
+                AppLogger.error("HTTP", "URL 非法（已尝试编码重试）：\(analyzedUrl.url.prefix(220))")
+                throw URLError(.badURL)
+            }
+            AppLogger.warn("HTTP", "URL 含未编码字符，已自动编码：\(encoded.prefix(220))")
+            url = retried
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = analyzedUrl.method.rawValue
         // 多书源搜索时要快速失败，30 秒会让几百个源排到天荒地老
@@ -258,6 +269,15 @@ class AnalyzeUrl {
         return (body, finalUrl)
     }
     
+    /// 补全 URL 中未编码的字符（中文、空格、换行等），已编码的 %XX 保持不变
+    static func encodeIfNeeded(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var allowed = CharacterSet.urlQueryAllowed
+        // URL 结构字符与已编码标记必须保留，否则会把 %E4 变成 %25E4
+        allowed.insert(charactersIn: "#[]@!$&'()*+,;=:/?%")
+        return trimmed.addingPercentEncoding(withAllowedCharacters: allowed) ?? trimmed
+    }
+
     // MARK: - 编码检测
     
     /// 自动检测响应内容的编码

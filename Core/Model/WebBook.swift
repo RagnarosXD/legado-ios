@@ -352,9 +352,16 @@ class WebBook {
             throw WebBookError.noRule("正文规则")
         }
         
+        // 章节地址为空/异常时直接给出可读原因，避免走到 URLSession 报 -1000
+        let chapterAddress = sanitizeURL(chapter.chapterUrl)
+        guard !chapterAddress.isEmpty else {
+            AppLogger.error("WebBook", "章节地址为空 \(source.bookSourceName) 《\(book.name)》\(chapter.title)")
+            throw WebBookError.parseFailed("章节地址为空（\(chapter.title)）")
+        }
+
         // 1. 请求正文页
         let analyzedUrl = AnalyzeUrl.analyze(
-            ruleUrl: sanitizeURL(chapter.chapterUrl),
+            ruleUrl: chapterAddress,
             baseUrl: source.bookSourceUrl,
             source: source
         )

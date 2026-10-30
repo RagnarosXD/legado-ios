@@ -249,7 +249,7 @@ class ReaderViewModel: ObservableObject {
             } catch is CancellationError {
                 isLoading = false
             } catch {
-                errorMessage = "加载失败：\(error.localizedDescription)"
+                errorMessage = "加载失败：\(Self.friendlyError(error))"
                 isLoading = false
             }
         }
@@ -631,6 +631,28 @@ class ReaderViewModel: ObservableObject {
         try? context.save()
         isCachingAll = false
         AppLogger.info("Cache", "缓存结束 \(cacheCompleted)/\(cacheTotal)")
+    }
+
+    /// 把 NSURLError 这类「天书」翻译成用户能看懂的原因
+    static func friendlyError(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case -1000:
+                return "章节地址不合法（为空或含非法字符），可尝试换源"
+            case -1001:
+                return "请求超时，可稍后重试或换源"
+            case -1003, -1004:
+                return "无法连接站点，可能已失效，建议换源"
+            case -1009:
+                return "网络未连接"
+            case -1022:
+                return "系统限制该 http 站点（ATS），建议换源"
+            default:
+                break
+            }
+        }
+        return error.localizedDescription
     }
 
     private func cacheChapter(_ chapter: BookChapter, content: String) async throws {

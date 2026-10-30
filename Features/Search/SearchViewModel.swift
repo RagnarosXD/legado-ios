@@ -159,7 +159,7 @@ class SearchViewModel: ObservableObject {
         rebuildMergedResults()
         AppLogger.info("Search", "搜索结束 结果=\(collected.count) 聚合=\(mergedResults.count) 失败源=\(failures.count)")
 
-        if merged.isEmpty {
+        if collected.isEmpty {
             if enabledSources.isEmpty, skippedCount > 0 {
                 errorMessage = "启用的书源都是有声/漫画/图片类型（\(skippedCount) 个），当前版本只支持电子书文本源。"
             } else if !failures.isEmpty {

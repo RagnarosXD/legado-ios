@@ -259,27 +259,45 @@ class WebBook {
             elementCtx.source = source
             var chapter = WebChapter()
             chapter.index = index
-            
-            chapter.title = ruleEngine.getString(
+
+            var title = ruleEngine.getString(
                 ruleStr: tocRule.chapterName,
                 elementContext: elementCtx,
                 baseUrl: redirectUrl
             )
-            
-            chapter.url = ruleEngine.getString(
+            if title.isEmpty {
+                title = ruleEngine.getString(ruleStr: "text", elementContext: elementCtx, baseUrl: redirectUrl)
+            }
+
+            var link = ruleEngine.getString(
                 ruleStr: tocRule.chapterUrl,
                 elementContext: elementCtx,
                 baseUrl: redirectUrl
             )
-            
+            if link.isEmpty {
+                // Legado 的默认行为：章节链接取当前元素的 href
+                link = ruleEngine.getString(ruleStr: "@href", elementContext: elementCtx, baseUrl: redirectUrl)
+            }
+            if link.isEmpty {
+                // 再退一步：取元素内第一个 a 的 href
+                link = ruleEngine.getString(ruleStr: "a@href", elementContext: elementCtx, baseUrl: redirectUrl)
+            }
+
             if let isVipRule = tocRule.isVip {
                 let vipStr = ruleEngine.getString(ruleStr: isVipRule, elementContext: elementCtx)
                 chapter.isVip = vipStr == "true" || vipStr == "1"
             }
-            
-            if !chapter.title.isEmpty {
-                chapters.append(chapter)
+
+            guard !title.isEmpty, isValidChapterLink(link) else {
+                if !title.isEmpty {
+                    AppLogger.warn("WebBook", "跳过无效章节 \(source.bookSourceName) \(title) url=\(link.prefix(80))")
+                }
+                continue
             }
+
+            chapter.title = title
+            chapter.url = link
+            chapters.append(chapter)
         }
         
         // 3. 处理目录分页（nextTocUrl）
@@ -319,12 +337,25 @@ class WebBook {
                     elementCtx.source = source
                     var chapter = WebChapter()
                     chapter.index = chapters.count
-                    chapter.title = ruleEngine.getString(ruleStr: tocRule.chapterName, elementContext: elementCtx, baseUrl: nextRedirectUrl)
-                    chapter.url = ruleEngine.getString(ruleStr: tocRule.chapterUrl, elementContext: elementCtx, baseUrl: nextRedirectUrl)
-                    
-                    if !chapter.title.isEmpty {
-                        chapters.append(chapter)
+
+                    var title = ruleEngine.getString(ruleStr: tocRule.chapterName, elementContext: elementCtx, baseUrl: nextRedirectUrl)
+                    if title.isEmpty {
+                        title = ruleEngine.getString(ruleStr: "text", elementContext: elementCtx, baseUrl: nextRedirectUrl)
                     }
+
+                    var link = ruleEngine.getString(ruleStr: tocRule.chapterUrl, elementContext: elementCtx, baseUrl: nextRedirectUrl)
+                    if link.isEmpty {
+                        link = ruleEngine.getString(ruleStr: "@href", elementContext: elementCtx, baseUrl: nextRedirectUrl)
+                    }
+                    if link.isEmpty {
+                        link = ruleEngine.getString(ruleStr: "a@href", elementContext: elementCtx, baseUrl: nextRedirectUrl)
+                    }
+
+                    guard !title.isEmpty, isValidChapterLink(link) else { continue }
+
+                    chapter.title = title
+                    chapter.url = link
+                    chapters.append(chapter)
                 }
                 
                 // 防止无限循环，最多 100 页
@@ -466,13 +497,27 @@ class WebBook {
         return plain.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
-    /// 清洗解析结果里的 URL：去掉规则残留的 `##替换` 片段，避免把 `##` 编码进请求地址
+    /// 清洗解析结果里的 URL：去掉规则残留的 `##替换` 片段、解码 HTML 实体
     static func sanitizeURL(_ url: String) -> String {
         var value = url.trimmingCharacters(in: .whitespacesAndNewlines)
         if let range = value.range(of: "##") {
             value = String(value[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        // 目录里的 &amp; 不解码会导致参数错误
+        value = value.replacingOccurrences(of: "&amp;", with: "&")
         return value
+    }
+
+    /// 目录里常见的无效链接：javascript:、锚点、about:blank
+    private static func isValidChapterLink(_ raw: String) -> Bool {
+        let link = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !link.isEmpty else { return false }
+
+        let lowered = link.lowercased()
+        if lowered.hasPrefix("javascript:") || lowered.hasPrefix("#") || lowered.hasPrefix("about:") {
+            return false
+        }
+        return true
     }
 
     /// 相对地址补全（封面、详情页地址）

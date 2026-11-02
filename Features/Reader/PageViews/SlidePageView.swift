@@ -19,6 +19,8 @@ struct SlidePageView: View {
                 SinglePageContent(
                     text: page,
                     viewModel: viewModel,
+                    pages: pages,
+                    currentPage: $currentPage,
                     onTap: onTap
                 )
                 .tag(index)
@@ -36,17 +38,36 @@ struct SlidePageView: View {
 private struct SinglePageContent: View {
     let text: String
     @ObservedObject var viewModel: ReaderViewModel
+    let pages: [String]
+    @Binding var currentPage: Int
     let onTap: () -> Void
-    
+
     var body: some View {
-        ZStack {
-            viewModel.backgroundColor
-            
-            PageTextView(text: text, viewModel: viewModel)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
+        GeometryReader { geometry in
+            ZStack {
+                viewModel.backgroundColor
+
+                PageTextView(text: text, viewModel: viewModel)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { location in
+                switch ReaderTapZone.action(for: location, in: geometry.size) {
+                case .prevPage:
+                    if currentPage > 0 {
+                        currentPage -= 1
+                    } else {
+                        Task { await viewModel.prevChapter() }
+                    }
+                case .nextPage:
+                    if currentPage + 1 < pages.count {
+                        currentPage += 1
+                    } else {
+                        Task { await viewModel.nextChapter() }
+                    }
+                case .menu:
+                    onTap()
+                }
+            }
         }
     }
 }

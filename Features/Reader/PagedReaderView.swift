@@ -251,21 +251,23 @@ struct InstantPageView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { location in
-                let tapZone = location.x / width
-                if tapZone < 0.3 {
-                    // 左侧：上一页
+                // 对齐 Android 九宫格：左列上一页、正中菜单、其余下一页
+                switch ReaderTapZone.action(for: location, in: geometry.size) {
+                case .prevPage:
                     if currentPage > 0 {
                         currentPage -= 1
                         viewModel.currentPageIndex = currentPage
+                    } else {
+                        Task { await viewModel.prevChapter() }
                     }
-                } else if tapZone > 0.7 {
-                    // 右侧：下一页
+                case .nextPage:
                     if currentPage + 1 < pages.count {
                         currentPage += 1
                         viewModel.currentPageIndex = currentPage
+                    } else {
+                        Task { await viewModel.nextChapter() }
                     }
-                } else {
-                    // 中间：显示/隐藏 UI
+                case .menu:
                     onTap()
                 }
             }
@@ -281,6 +283,36 @@ struct InstantPageView: View {
                         }
                     }
             )
+        }
+    }
+}
+
+// MARK: - 点击区域（对齐 Android ReadView.setRect9x 的默认映射）
+
+enum ReaderTapZone {
+
+    enum Action {
+        case prevPage
+        case nextPage
+        case menu
+    }
+
+    /// X / Y 各三等分（Android `setRect9x()`：0~0.33 / 0.33~0.66 / 0.66~1.0）
+    /// 默认动作：左列上一页、正中菜单、其余下一页
+    /// 对应 `AppConfig.kt:54-62`（TL/TC/ML/BL → 上一页，MC → 菜单，TR/MR/BC/BR → 下一页）
+    static func action(for location: CGPoint, in size: CGSize) -> Action {
+        guard size.width > 0, size.height > 0 else { return .menu }
+
+        let column = min(2, max(0, Int(location.x / size.width * 3)))
+        let row = min(2, max(0, Int(location.y / size.height * 3)))
+
+        switch (column, row) {
+        case (0, _):
+            return .prevPage
+        case (1, 1):
+            return .menu
+        default:
+            return .nextPage
         }
     }
 }

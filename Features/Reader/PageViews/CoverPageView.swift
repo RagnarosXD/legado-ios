@@ -94,9 +94,27 @@ struct CoverPageView: View {
                     }
             )
             .simultaneousGesture(
-                TapGesture()
-                    .onEnded { _ in
-                        if !isDragging {
+                SpatialTapGesture()
+                    .onEnded { value in
+                        guard !isDragging else { return }
+
+                        // 对齐 Android 九宫格：左列上一页、正中菜单、其余下一页
+                        switch ReaderTapZone.action(for: value.location, in: geometry.size) {
+                        case .prevPage:
+                            if currentPage > 0 {
+                                currentPage -= 1
+                                viewModel.currentPageIndex = currentPage
+                            } else {
+                                Task { await viewModel.prevChapter() }
+                            }
+                        case .nextPage:
+                            if currentPage + 1 < pages.count {
+                                currentPage += 1
+                                viewModel.currentPageIndex = currentPage
+                            } else {
+                                Task { await viewModel.nextChapter() }
+                            }
+                        case .menu:
                             onTap()
                         }
                     }

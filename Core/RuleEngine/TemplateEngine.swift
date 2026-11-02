@@ -41,6 +41,26 @@ class TemplateEngine {
         return result
     }
 
+    /// 从任意位置的规则里抽取所有 `@put:{...}`（括号配平），返回 put 块与剩余规则
+    static func extractPuts(_ rule: String) -> (puts: [String], rest: String) {
+        var puts: [String] = []
+        var rest = rule
+
+        while let keyword = rest.range(of: "@put:") {
+            var cursor = keyword.upperBound
+            while cursor < rest.endIndex, rest[cursor] == " " {
+                cursor = rest.index(after: cursor)
+            }
+            guard cursor < rest.endIndex, rest[cursor] == "{" else { break }
+            guard let close = matchingBraceIndex(in: rest, from: cursor) else { break }
+
+            puts.append(String(rest[keyword.lowerBound...close]))
+            rest.removeSubrange(keyword.lowerBound...close)
+        }
+
+        return (puts, rest.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     static func parsePut(_ rule: String) -> [(key: String, rule: String)]? {
         let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("@put:{") else { return nil }
@@ -93,8 +113,9 @@ class TemplateEngine {
                 context.lastResult = .string(value)
                 lastValue = value
             } catch {
-                print("@put 执行失败 [\(assignment.key)]: \(error)")
-                return false
+                // 对齐 Android：单个 key 求值失败只跳过，不中断整条 @put
+                AppLogger.warn("Rule", "@put 失败 [\(assignment.key)]: \(error)")
+                continue
             }
         }
 
@@ -133,6 +154,24 @@ class TemplateEngine {
 
         if let value = context.variables[key] {
             return value
+        }
+
+        // @get:key / {{@get:key}}
+        if key.hasPrefix("@get:") {
+            let name = String(key.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            return context.variables[name] ?? ""
+        }
+
+        // {{n}}：从当前结果列表按索引取（Android makeUpRule 语义）
+        if let index = Int(key) {
+            switch context.lastResult {
+            case .list(let values):
+                return (index >= 0 && index < values.count) ? values[index] : ""
+            case .string(let value):
+                return index == 0 ? value : ""
+            case .none:
+                return ""
+            }
         }
 
         // 对齐 Android：{{...}} 里的内容按 JS 表达式求值（如 {{(page-1)*20}}）

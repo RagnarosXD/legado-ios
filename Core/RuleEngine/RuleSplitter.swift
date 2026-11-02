@@ -158,12 +158,35 @@ class RuleSplitter {
 ///   - `div#list@tag.li` 这类「先定位容器、再取子项」的级联写法
 enum LegadoSelector {
 
+    /// `[start:end:step]` 区间（对齐 Android AnalyzeByJSoup.findIndexSet 的 Triple）
+    struct Slice {
+        var start: Int?
+        var end: Int?
+        var step: Int?
+    }
+
+    enum IndexMode {
+        case none
+        /// `.` 前缀：选择
+        case select
+        /// `!` 前缀：排除
+        case exclude
+    }
+
     struct Parsed {
         var selector: String = ""
         /// 级联步骤：从外到内依次 select（对应 @tag. / @class. 语法）
         var cascades: [String] = []
         var attr: String = "text"
-        var index: Int?
+        /// `text.xxx`：按「自有文本包含」筛选（Android getElementsContainingOwnText）
+        var ownTextFilter: String?
+        /// 规则首字符 `-`：整个列表反转
+        var reverse: Bool = false
+        var indexMode: IndexMode = .none
+        /// 单位置索引（`.` / `!` 写法），支持负数（倒序）
+        var indexValues: [Int] = []
+        /// `[...]` 区间写法
+        var slices: [Slice] = []
     }
 
     static func parse(_ rule: String) -> Parsed {
@@ -171,16 +194,15 @@ enum LegadoSelector {
         var parsed = Parsed()
         guard !text.isEmpty else { return parsed }
 
-        // 末尾索引：class.item!0
-        if let bang = text.lastIndex(of: "!") {
-            let tail = String(text[text.index(after: bang)...]).trimmingCharacters(in: .whitespaces)
-            if !tail.isEmpty, let idx = Int(tail) {
-                parsed.index = idx
-                text = String(text[..<bang]).trimmingCharacters(in: .whitespaces)
-            }
+        // 规则首字符 - / +：反转 / 正序（Android BookList.kt:90-96）
+        if text.hasPrefix("-") {
+            parsed.reverse = true
+            text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+        } else if text.hasPrefix("+") {
+            text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
         }
 
-        // 从右往左剥离 @ 段：@href 是属性，@tag.li / @class.x 是级联步骤
+        // 1) 从右往左剥离 @ 段：@href 是属性，@tag.li / @class.x 是级联步骤
         var attrResolved = false
         while let at = text.lastIndex(of: "@") {
             let tail = String(text[text.index(after: at)...]).trimmingCharacters(in: .whitespaces)
@@ -202,18 +224,86 @@ enum LegadoSelector {
             break
         }
 
-        // 索引也可能写在级联之前：class.book!1@tag.h2
-        if let bang = text.lastIndex(of: "!") {
-            let tail = String(text[text.index(after: bang)...]).trimmingCharacters(in: .whitespaces)
-            if !tail.isEmpty, let idx = Int(tail) {
-                parsed.index = idx
-                text = String(text[..<bang]).trimmingCharacters(in: .whitespaces)
-            }
+        // 2) 尾部索引：`[a:b:c]` 区间 或 `.N` / `!N` 列表
+        parseTrailingIndex(&text, into: &parsed)
+
+        // 3) text.xxx → 自有文本包含匹配
+        if text.hasPrefix("text.") {
+            parsed.ownTextFilter = String(text.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            text = ""
         }
 
         parsed.selector = convert(text)
         return parsed
     }
+
+    // MARK: - 尾部索引解析（对齐 findIndexSet）
+
+    private static func parseTrailingIndex(_ text: inout String, into parsed: inout Parsed) {
+        let source = text.trimmingCharacters(in: .whitespaces)
+
+        // A. `[...]`：支持 `[0]`、`[-1]`、`[0:2]`、`[0:2:1]`、`[-1:0]`、`[!0:2]`
+        if source.hasSuffix("]"), let open = source.lastIndex(of: "[") {
+            let inner = String(source[source.index(after: open)..<source.index(before: source.endIndex)])
+            var body = inner.trimmingCharacters(in: .whitespaces)
+
+            var exclude = false
+            if body.hasPrefix("!") {
+                exclude = true
+                body = String(body.dropFirst()).trimmingCharacters(in: .whitespaces)
+            }
+
+            var values: [Int] = []
+            var slices: [Slice] = []
+
+            for part in body.split(separator: ",", omittingEmptySubsequences: true) {
+                let piece = part.trimmingCharacters(in: .whitespaces)
+                if piece.contains(":") {
+                    let comps = piece
+                        .split(separator: ":", omittingEmptySubsequences: false)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                    guard comps.count == 2 || comps.count == 3 else { continue }
+                    let start = comps[0].isEmpty ? nil : Int(comps[0])
+                    let end = comps[1].isEmpty ? nil : Int(comps[1])
+                    let step = comps.count == 3 && !comps[2].isEmpty ? Int(comps[2]) : nil
+                    if start != nil || end != nil || step != nil {
+                        slices.append(Slice(start: start, end: end, step: step))
+                    }
+                } else if let value = Int(piece) {
+                    values.append(value)
+                }
+            }
+
+            guard !values.isEmpty || !slices.isEmpty else { return }
+
+            parsed.indexMode = exclude ? .exclude : .select
+            parsed.indexValues = values
+            parsed.slices = slices
+            text = String(source[..<open]).trimmingCharacters(in: .whitespaces)
+            return
+        }
+
+        // B. `.N` / `!N` / `!0,2`（Android 旧写法，可出现在最右）
+        let pattern = #"([.!])(\s*-?\d+(?:\s*,\s*-?\d+)*)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
+              let markRange = Range(match.range(at: 1), in: source),
+              let valueRange = Range(match.range(at: 2), in: source) else {
+            return
+        }
+
+        let numbers = String(source[valueRange])
+            .split(separator: ",")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !numbers.isEmpty else { return }
+
+        parsed.indexMode = source[markRange] == "!" ? .exclude : .select
+        parsed.indexValues = numbers
+        let cut = source.index(source.startIndex, offsetBy: match.range.location)
+        text = String(source[..<cut]).trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - 工具
 
     /// 判断是否是 Legado 的「步骤前缀」，如 @tag.li
     static func isStepPrefix(_ value: String) -> Bool {
@@ -240,6 +330,7 @@ enum LegadoSelector {
     }
 
     /// 默认语法 → CSS 选择器
+    /// 注意：`text.xxx` 由 ownTextFilter 承载，这里不再当标签名处理
     static func convert(_ rule: String) -> String {
         let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
@@ -256,9 +347,6 @@ enum LegadoSelector {
         }
         if trimmed.hasPrefix("tag.") {
             return String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
-        }
-        if trimmed.hasPrefix("text.") {
-            return String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
         }
         return trimmed
     }

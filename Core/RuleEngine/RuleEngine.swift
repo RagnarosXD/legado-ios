@@ -183,11 +183,15 @@ class RuleEngine {
         let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .none }
 
-        if TemplateEngine.parsePut(trimmed) != nil {
-            guard TemplateEngine.executePut(trimmed, context: context, ruleEngine: self) else {
-                throw RuleError.executionFailed("@put 执行失败：\(trimmed)")
+        // 对齐 Android：@put 可出现在规则任意位置；先执行它，再用剩余规则继续求值
+        let putExtraction = TemplateEngine.extractPuts(trimmed)
+        if !putExtraction.puts.isEmpty {
+            for block in putExtraction.puts {
+                _ = TemplateEngine.executePut(block, context: context, ruleEngine: self)
             }
-            return context.lastResult
+            let remain = putExtraction.rest.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !remain.isEmpty else { return context.lastResult }
+            return try executeWithSplit(remain, context: context)
         }
 
         if let key = TemplateEngine.parseGet(trimmed) {
@@ -468,9 +472,10 @@ class RuleEngine {
                 }
             }
 
-            if let index = parsed.index {
-                let real = index < 0 ? selected.count + index : index
-                selected = (real >= 0 && real < selected.count) ? [selected[real]] : []
+            // 对齐 Android AnalyzeByJSoup：支持 .N / !N / [a:b:c] / 反转
+            selected = CSSParser.applyIndex(selected, parsed: parsed)
+            if let ownText = parsed.ownTextFilter {
+                selected = CSSParser.filterByOwnText(selected, ownText: ownText)
             }
 
             elements = selected.map { ElementContext(element: $0, baseUrl: baseUrl) }
@@ -716,8 +721,14 @@ class CSSParser: RuleExecutor {
         let parsed = LegadoSelector.parse(rule)
 
         var elements: [SwiftSoup.Element]
-        if parsed.selector.isEmpty {
-            elements = [root]
+
+        if let ownText = parsed.ownTextFilter {
+            // text.xxx：在子孙里按「自有文本包含」筛选
+            let candidates = root.getAllElements().array().filter { $0 !== root }
+            elements = CSSParser.filterByOwnText(candidates, ownText: ownText)
+        } else if parsed.selector.isEmpty {
+            // 对齐 Android：前置规则为空且有索引时，索引作用于 children
+            elements = (parsed.indexMode == .none) ? [root] : root.children().array()
         } else {
             do {
                 elements = try root.select(parsed.selector).array()
@@ -736,10 +747,7 @@ class CSSParser: RuleExecutor {
             }
         }
 
-        if let index = parsed.index {
-            let real = index < 0 ? elements.count + index : index
-            elements = (real >= 0 && real < elements.count) ? [elements[real]] : []
-        }
+        elements = CSSParser.applyIndex(elements, parsed: parsed)
 
         guard !elements.isEmpty else { return .none }
 
@@ -751,6 +759,93 @@ class CSSParser: RuleExecutor {
 
         guard !values.isEmpty else { return .none }
         return values.count == 1 ? .string(values[0]) : .list(values)
+    }
+
+    /// 应用 Legado 索引语法（对齐 AnalyzeByJSoup.getResultList）
+    /// 支持 `.N`（选择）、`!N`（排除）、`[start:end:step]`、负数倒数、反转、越界裁剪
+    static func applyIndex(_ input: [SwiftSoup.Element], parsed: LegadoSelector.Parsed) -> [SwiftSoup.Element] {
+        var elements = parsed.reverse ? Array(input.reversed()) : input
+        guard !elements.isEmpty, parsed.indexMode != .none else { return elements }
+
+        let len = elements.count
+        var ordered: [Int] = []
+
+        func add(_ value: Int) {
+            guard value >= 0, value < len else { return }
+            if !ordered.contains(value) { ordered.append(value) }
+        }
+
+        for value in parsed.indexValues {
+            if value >= 0, value < len {
+                add(value)
+            } else if value < 0, len >= -value {
+                add(value + len)
+            }
+        }
+
+        for slice in parsed.slices {
+            var start = slice.start ?? 0
+            if start < 0 { start += len }
+            var end = slice.end ?? (len - 1)
+            if end < 0 { end += len }
+
+            if (start < 0 && end < 0) || (start >= len && end >= len) { continue }
+
+            if start >= len { start = len - 1 } else if start < 0 { start = 0 }
+            if end >= len { end = len - 1 } else if end < 0 { end = 0 }
+
+            let rawStep = slice.step ?? 1
+            if start == end || abs(rawStep) >= len {
+                add(start)
+                continue
+            }
+
+            var step = rawStep
+            if step <= 0 {
+                step = (-step < len) ? step + len : 1
+            }
+            guard step != 0 else { continue }
+
+            if end > start {
+                var i = start
+                while i <= end {
+                    add(i)
+                    i += step
+                }
+            } else {
+                var i = start
+                while i >= end {
+                    add(i)
+                    i -= abs(step)
+                }
+            }
+        }
+
+        switch parsed.indexMode {
+        case .exclude:
+            let excluded = Set(ordered)
+            elements = elements.enumerated()
+                .filter { !excluded.contains($0.offset) }
+                .map { $0.element }
+        case .select:
+            let snapshot = elements
+            elements = ordered.compactMap { (0..<snapshot.count).contains($0) ? snapshot[$0] : nil }
+        case .none:
+            break
+        }
+
+        return elements
+    }
+
+    /// text.xxx：按「自有文本包含」筛选（对齐 Android getElementsContainingOwnText）
+    static func filterByOwnText(_ elements: [SwiftSoup.Element], ownText: String) -> [SwiftSoup.Element] {
+        guard !ownText.isEmpty else { return elements }
+        let target = ownText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return elements }
+
+        return elements.filter { element in
+            element.textNodes().contains { $0.text().contains(target) }
+        }
     }
 
     /// 从元素中按属性名取值

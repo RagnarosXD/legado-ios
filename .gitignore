@@ -25,3 +25,6 @@ __pycache__/
 *.log
 .ace-tool/
 node_modules/
+
+# Android 对照源码（本地参考，不入库）
+.android-ref/

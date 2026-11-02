@@ -142,6 +142,8 @@ class JSBridge {
         }
 
         javaObject?.setObject(ajaxBlock, forKeyedSubscript: "ajax" as NSString)
+        // Android JsExtensions.connect()：语义与 ajax 相同（返回响应体字符串）
+        javaObject?.setObject(ajaxBlock, forKeyedSubscript: "connect" as NSString)
         javaObject?.setObject(getStringAsyncBlock, forKeyedSubscript: "getStringAsync" as NSString)
         javaObject?.setObject(putBlock, forKeyedSubscript: "put" as NSString)
         javaObject?.setObject(getBlock, forKeyedSubscript: "get" as NSString)

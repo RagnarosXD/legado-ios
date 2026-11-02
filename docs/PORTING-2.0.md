@@ -66,3 +66,28 @@
 6. XPath 元素保持节点身份（当前转 HTML 字符串二次解析）
 7. `AnalyzeUrl.analyzeJs()`（`<js>`/`@js:`/`@result`）与 `{{...}}` 的 JS 表达式语义
 8. `java.*` 桥全量对齐 `JsExtensions.kt`
+## 六、P1 完成状态（截至 1.3.9）
+
+### 已完成（按 Android 语义对齐）
+
+| 类别 | 项目 |
+| --- | --- |
+| 规则切分 | `:` → Regex（allInOne）、`<js>`/`@js:` 切段、`@@` 转义、`@css:`/`@xpath:`/`@json:` 前缀、`/` 开头 XPath、`$.`/`$[` JSONPath、省略 `$.` 的路径 |
+| 取值 | `@html`（去 script/style 的 outerHtml）、`@innerhtml`、`@textNodes`（trim+去空）、`@ownText`、`@text`（保留段落）、`@href/@src`（绝对化 + data-* 回退）、字段结果 HTML 实体反转义 |
+| 索引 | `.N`（选择）、`!N`（排除）、`!0,2` 多值、负数倒数、`[a]`、`[a:b]`、`[a:b:c]`、`[-1:0]` 反转、越界裁剪、规则首 `-` 反转 |
+| 简写 | `class.` / `id.` / `tag.` / `children` / `text.`（自有文本包含）、`@tag.`/`@class.` 级联、空前置规则 → children |
+| 变量与参数 | `@put:{...}` 任意位置抽取（括号配平）、`{{n}}` 列表索引、`@get:key`、`{{表达式}}` JS 求值（page/key/baseUrl）、变量表跨规则共享 |
+| URL | `<1,2,3>` 页数规则、`{{...}}` JS 表达式、相对地址按最终响应 URL 补全、`javascript:` 过滤、`##` 残留清洗、`&amp;` 解码 |
+| 兜底 | 规则对象永不为 null（空对象）、列表只要求书名、`bookUrl`/章节链接为空回落 baseUrl、`tocUrl` 空回落详情页、BookInfo 覆盖策略、封面相对地址补全 |
+| JS 桥 | `java.ajax/connect/ajaxAll/post/getString/getElements/put/get/log/base64/md5/decodeURI/encodeURI/timeFormat/htmlFormat/toast/longToast` |
+
+验证：`Type Check`（Linux + 真实 SwiftSoup + JSC 桩）全绿。
+
+### P1 遗留（不阻塞 P2，按需补）
+
+| 项 | 影响 | 计划 |
+| --- | --- | --- |
+| XPath 元素身份（当前转 HTML 二次解析） | 表格类结构可能变形 | P2 后按样本处理 |
+| `java.webView/startBrowser/downloadFile/cookie/cacheFile/aes/des/digest` | 少数源依赖 | 按失败源逐个补 |
+| `setLocal` 语义 | Android 源码未在本轮核实 | 核实后再实现 |
+| `@regex` 的 replaceFirst 细节 | 少量源 | P1.1 |

@@ -724,7 +724,7 @@ class CSSParser: RuleExecutor {
 
         if let ownText = parsed.ownTextFilter {
             // text.xxx：在子孙里按「自有文本包含」筛选
-            let candidates = root.getAllElements().array().filter { $0 !== root }
+            let candidates = ((try? root.getAllElements().array()) ?? []).filter { $0 !== root }
             elements = CSSParser.filterByOwnText(candidates, ownText: ownText)
         } else if parsed.selector.isEmpty {
             // 对齐 Android：前置规则为空且有索引时，索引作用于 children

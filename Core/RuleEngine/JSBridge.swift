@@ -601,10 +601,10 @@ extension JSBridge {
         }
         javaObject.setObject(uuidBlock, forKeyedSubscript: "randomUUID" as NSString)
 
-        let logTypeBlock: @convention(block) (Any?) -> Void = { value in
-            AppLogger.debug("JS", "logType: \(String(describing: value))")
+        let logTypeBlock: @convention(block) (String) -> Void = { value in
+            AppLogger.debug("JS", "logType: \(value)")
         }
-        javaObject.setObject(logTypeBlock, forKeyedSubscript: "logType" as NSString)
+        javaObject.setObject(logTypeBlock, forKeyedSubscript: "__logType" as NSString)
 
         // cookie
         let cookieBlock: @convention(block) (String) -> String = { url in
@@ -645,6 +645,7 @@ extension JSBridge {
                     var raw = java.__getElements(s(rule));
                     try { var list = JSON.parse(raw); return list.length ? list[0] : null; } catch (e) { return null; }
                 };
+                java.logType = function (value) { java.__logType(s(value)); };
                 java.strToBytes = function (text) {
                     try { return JSON.parse(java.__strToBytes(s(text))); } catch (e) { return []; }
                 };

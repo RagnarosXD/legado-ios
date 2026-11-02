@@ -175,7 +175,7 @@ class RuleSplitter {
         return nil
     }
 
-    private static func splitTopLevel(_ rule: String, separator: String) -> [String] {
+    static func splitTopLevel(_ rule: String, separator: String) -> [String] {
         var parts: [String] = []
         var current = ""
         var squareDepth = 0
@@ -406,6 +406,14 @@ enum LegadoSelector {
                 continue
             }
 
+            // 普通 CSS 级联（Android 把 @ 切成多段，前 n-1 段是选择器）：
+            // 例如 div.a@div.item@text 中的 div.item
+            if looksLikeSelector(tail) {
+                parsed.cascades.insert(convert(tail), at: 0)
+                text = head
+                continue
+            }
+
             break
         }
 
@@ -499,6 +507,19 @@ enum LegadoSelector {
         return false
     }
 
+    /// 判断 `@` 之后是「级联选择器」而非属性名
+    /// 属性名只允许字母数字 + `: - _`，含 `.` `#` `[` `>` `*` `,` 的都是选择器
+    static func looksLikeSelector(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if isAttribute(trimmed) { return false }
+        if trimmed.contains(" ") { return false }
+        return trimmed.range(
+            of: #"^[A-Za-z0-9_.#\[\]>:=*,-]+$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
     /// 判断 @ 之后是否是属性名（只允许字母、数字、冒号、下划线、减号）
     static func isAttribute(_ value: String) -> Bool {
         guard !value.isEmpty else { return false }
@@ -546,7 +567,7 @@ enum JSONPathEvaluator {
         case recursive(String?)
         case index(Int)
         case wildcard
-        case slice(Int?, Int?)
+        case slice(Int?, Int?, Int?)
         case filter(String)
     }
 
@@ -645,7 +666,8 @@ enum JSONPathEvaluator {
                 .map { String($0).trimmingCharacters(in: .whitespaces) }
             let start = parts.indices.contains(0) ? Int(parts[0]) : nil
             let end = parts.indices.contains(1) ? Int(parts[1]) : nil
-            return .slice(start, end)
+            let step = parts.count > 2 ? Int(parts[2]) : nil
+            return .slice(start, end, step)
         }
 
         if let number = Int(inner) { return .index(number) }
@@ -698,11 +720,31 @@ enum JSONPathEvaluator {
                         next.append(contentsOf: dict.values)
                     }
 
-                case .slice(let start, let end):
-                    if let array = value as? [Any] {
-                        let lower = max(0, start ?? 0)
-                        let upper = min(array.count, end ?? array.count)
-                        if lower < upper { next.append(contentsOf: array[lower..<upper]) }
+                case .slice(let start, let end, let step):
+                    if let array = value as? [Any], !array.isEmpty {
+                        let total = array.count
+                        var lower = start ?? 0
+                        if lower < 0 { lower += total }
+                        var upper = end ?? total
+                        if upper < 0 { upper += total }
+                        lower = max(0, min(total, lower))
+                        upper = max(0, min(total, upper))
+
+                        let stride = step ?? 1
+                        if stride >= 1 {
+                            var index = lower
+                            while index < upper {
+                                next.append(array[index])
+                                index += stride
+                            }
+                        } else {
+                            // 负 step：从 upper-1 向下取（对应 jayway 的倒序切片）
+                            var index = min(total - 1, upper - 1)
+                            while index >= lower, index >= 0 {
+                                next.append(array[index])
+                                index += stride
+                            }
+                        }
                     }
 
                 case .filter(let expr):
@@ -750,6 +792,17 @@ enum JSONPathEvaluator {
             expr = String(expr.dropFirst().dropLast())
         }
         expr = expr.trimmingCharacters(in: .whitespaces)
+
+        // 逻辑组合：|| 任一成立、&& 全部成立（引号/括号内的分隔符不参与切分）
+        let orParts = RuleSplitter.splitTopLevel(expr, separator: "||")
+        if orParts.count > 1 {
+            return orParts.contains { matches(filter: $0, item: item) }
+        }
+
+        let andParts = RuleSplitter.splitTopLevel(expr, separator: "&&")
+        if andParts.count > 1 {
+            return andParts.allSatisfy { matches(filter: $0, item: item) }
+        }
 
         for op in ["==", "!=", ">=", "<=", ">", "<"] {
             guard let range = expr.range(of: op) else { continue }

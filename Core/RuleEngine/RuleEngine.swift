@@ -783,10 +783,23 @@ class RuleEngine {
         return URL(string: url, relativeTo: baseURL)?.absoluteString ?? url
     }
     
+    /// 单个节点（Android getElement）：取第一个命中节点
+    func getElement(ruleStr: String?, body: String, baseUrl: String?) throws -> ElementContext? {
+        guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return try getElements(ruleStr: ruleStr, body: body, baseUrl: baseUrl).first
+    }
+
     // MARK: - 获取字符串列表
     
     /// 获取字符串列表（用于目录列表等）
-    func getStringList(ruleStr: String?, body: String, baseUrl: String?) throws -> [String] {
+    func getStringList(
+        ruleStr: String?,
+        body: String,
+        baseUrl: String?,
+        isUrl: Bool = false
+    ) throws -> [String] {
         guard let ruleStr = ruleStr, !ruleStr.isEmpty else { return [] }
         
         let context = ExecutionContext()
@@ -806,7 +819,25 @@ class RuleEngine {
         context.baseURL = baseUrl.flatMap { URL(string: $0) }
 
         let result = try executeSingle(rule: ruleStr, context: context)
-        return result.list ?? (result.string.map { [$0] } ?? [])
+
+        var values: [String]
+        switch result {
+        case .list(let list):
+            values = list
+        case .string(let text):
+            // 对齐 Android：非列表结果按 \n 拆分
+            values = text.components(separatedBy: "\n").filter { !$0.isEmpty }
+        case .none:
+            values = []
+        }
+
+        if isUrl {
+            values = values.map { CSSParser.absolute($0, base: context.baseURL) }
+        }
+
+        // 去重并保序（Android getStringList 的 isUrl 分支行为）
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 }
 
@@ -840,8 +871,8 @@ class CSSParser: RuleExecutor {
             let candidates = ((try? root.getAllElements().array()) ?? []).filter { $0 !== root }
             elements = CSSParser.filterByOwnText(candidates, ownText: ownText)
         } else if parsed.selector.isEmpty {
-            // 对齐 Android：前置规则为空且有索引时，索引作用于 children
-            elements = (parsed.indexMode == .none) ? [root] : ((try? root.children().array()) ?? [])
+            // 对齐 Android AnalyzeByJSoup：前置规则为空时直接取 children
+            elements = (try? root.children().array()) ?? []
         } else {
             do {
                 elements = try root.select(parsed.selector).array()
@@ -864,10 +895,25 @@ class CSSParser: RuleExecutor {
 
         guard !elements.isEmpty else { return .none }
 
+        let loweredAttr = parsed.attr.lowercased()
+
+        // 对齐 Android AnalyzeByJSoup：@html 对「整个元素集合」删 script/style 后取 outerHtml，只产一条
+        if loweredAttr == "html" || loweredAttr == "all" {
+            let combined = elements.compactMap { try? $0.outerHtml() }.joined()
+            let cleaned = CSSParser.stripScripts(combined)
+            return cleaned.isEmpty ? .none : .string(cleaned)
+        }
+
         var values: [String] = []
         for element in elements {
             let value = try CSSParser.string(from: element, attr: parsed.attr, base: context.baseURL)
             if !value.isEmpty { values.append(value) }
+        }
+
+        // Android：属性类结果去重并保序（text / ownText 不去重）
+        if loweredAttr != "text", loweredAttr != "textnodes", loweredAttr != "owntext" {
+            var seen = Set<String>()
+            values = values.filter { seen.insert($0).inserted }
         }
 
         guard !values.isEmpty else { return .none }
@@ -1004,11 +1050,10 @@ class CSSParser: RuleExecutor {
             return CSSParser.absolute(raw, base: base)
 
         default:
+            // 对齐 Android：属性不存在就是空结果，不回退正文
+            // （否则 data-src 取不到时会把整段文字当封面地址）
             let raw = try element.attr(attr)
-            if raw.isEmpty {
-                return try element.text()
-            }
-            return CSSParser.absoluteIfNeeded(raw, attr: attr.lowercased(), base: base)
+            return raw.isEmpty ? "" : CSSParser.absoluteIfNeeded(raw, attr: attr.lowercased(), base: base)
         }
     }
 

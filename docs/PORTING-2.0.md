@@ -160,3 +160,40 @@
 - `followRedirects=false`：URLSession 需自定义 delegate 才能禁止跳转，当前仅记录字段
 - `dnsIp` / `serverID` / `webViewDelayTime` / `webJs`：属于 WebView / 私有 DNS 能力，字段已保存但未生效
 - `type`（直接读字节）：未实现
+## 十、批 3：取值细节（已对齐）+ P1 最终状态
+
+### 批 3 改动
+
+| # | Android 行为 | 位置 | iOS 实现 |
+| --- | --- | --- | --- |
+| 1 | `@html` = 对整个元素集合删 script/style 后 outerHtml，**只产一条** | `AnalyzeByJSoup.kt:255-262` | `CSSParser.execute` 的 `html`/`all` 分支合并集合 |
+| 2 | 属性不存在即无结果，不回退正文 | `AnalyzeByJSoup.kt:265-272` | `CSSParser.string` 的 default 分支返回空串 |
+| 3 | 属性结果去重（text/ownText 不去重） | `AnalyzeByJSoup.kt:269` | 取值后按 attr 类型去重保序 |
+| 4 | 列表前置规则为空 → `children()` | `AnalyzeByJSoup.kt:306` | `getHtmlElements`/`CSSParser` 改为取 children |
+| 5 | `getStringList`：非列表按 `\n` 拆分、空→nil、isUrl 绝对化去重 | `AnalyzeRule.kt:278-293` | `getStringList(..., isUrl:)` 重写 |
+| 6 | `getElement` 返回单节点 | `AnalyzeRule.kt:387-417` | 新增 `RuleEngine.getElement` |
+| 7 | `@` 切段中前 n-1 段是选择器（支持 `div.a@div.item@text`） | `AnalyzeByJSoup.kt:208-218` | `LegadoSelector.looksLikeSelector` + 级联 |
+| 8 | JSONPath 切片 step、`&&` / `||` 过滤组合 | `AnalyzeByJSonPath.kt`（jayway） | `slice(start:end:step:)` + `matches` 逻辑组合 |
+
+验证：`Type Check` ✅、`Build & Test` ✅（提交 `03ce7ec`）。
+
+### P1 最终判定（按 24 项审计点）
+
+| 判定 | 批次前 | 现在 |
+| --- | --- | --- |
+| 完全一致 | 0 | 15 |
+| 部分一致 | 23 | 8 |
+| 缺失 | 1 | 1 |
+
+剩余「部分一致」的 8 项与原因：
+
+1. `isUrl` 仍未做成 `getString` 的标准参数（调用侧分别处理，结果等价但入口不统一）
+2. `unescape` 仅对非正文结果执行（正文走 `joinAll`，Android 同样不过度反转义，差异很小）
+3. JSONPath 仍缺函数（`length()` / `avg()` / `min()`）与正则 `=~`
+4. `@put` 的 `{{}}` 在三段以上嵌套时的执行时机与 Android 略有差异
+5. XPath 子规则仍是「保留节点 + 纯取值直读」，CSS 子规则走字符串二次解析
+6. `AnalyzeUrl` 的 `followRedirects` / `dnsIp` / `webJs` / `type` 仅保存字段
+7. `java.*` 覆盖率约 45%（webView/浏览器/解压/字体/RSA/并发控制未实现）
+8. `AnalyzeByJSoup` 的 `tag.div.-1` 旧式点号索引与 `[]` 混写场景未覆盖
+
+缺失 1 项：`AnalyzeUrl` 的 `type`（直接读响应字节）未实现。

@@ -212,7 +212,8 @@ class WebBook {
         }
         if let coverUrl = infoRule.coverUrl {
             let parsed = ruleEngine.getString(ruleStr: coverUrl, elementContext: elementCtx, baseUrl: redirectUrl)
-            if !parsed.isEmpty { book.coverUrl = parsed }
+            // 对齐 Android 的 isUrl 语义：相对地址按当前页面补全
+            if !parsed.isEmpty { book.coverUrl = normalizeURL(parsed, base: redirectUrl) }
         }
         if let tocUrl = infoRule.tocUrl {
             let parsed = ruleEngine.getString(ruleStr: tocUrl, elementContext: elementCtx, baseUrl: redirectUrl)

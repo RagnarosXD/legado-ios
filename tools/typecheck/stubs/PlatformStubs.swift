@@ -10,6 +10,10 @@ public final class JSValue {
     public init?(object: Any, in context: JSContext) {}
     public func setObject(_ object: Any?, forKeyedSubscript key: NSString) {}
     public func toString() -> String? { nil }
+    public var isUndefined: Bool { false }
+    public var isNull: Bool { false }
+    public var isNumber: Bool { false }
+    public func toDouble() -> Double { 0 }
 }
 
 public final class JSContext {

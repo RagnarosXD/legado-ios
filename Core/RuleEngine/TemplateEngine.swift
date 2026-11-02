@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import JavaScriptCore
 
 class TemplateEngine {
     private static let maxRenderDepth = 20
@@ -134,11 +135,69 @@ class TemplateEngine {
             return value
         }
 
+        // 对齐 Android：{{...}} 里的内容按 JS 表达式求值（如 {{(page-1)*20}}）
+        if let evaluated = evaluateExpression(key, context: context) {
+            return evaluated
+        }
+
         if let fallback {
             return render(fallback, context: context)
         }
 
         return ""
+    }
+
+    // MARK: - {{表达式}} 求值（Android replaceKeyPageJs 语义）
+
+    private static var expressionLock = NSLock()
+    private static var expressionContext: JSContext?
+
+    private static func sharedExpressionContext() -> JSContext? {
+        expressionLock.lock()
+        defer { expressionLock.unlock() }
+
+        if let expressionContext { return expressionContext }
+
+        guard let created = JSContext() else {
+            AppLogger.error("Rule", "模板表达式 JSContext 创建失败")
+            return nil
+        }
+        created.setObject("1", forKeyedSubscript: "page" as NSString)
+        created.setObject("", forKeyedSubscript: "key" as NSString)
+        expressionContext = created
+        return created
+    }
+
+    /// 只对「看起来像表达式」的 token 求值：含运算符、长度可控
+    private static func evaluateExpression(_ token: String, context: ExecutionContext) -> String? {
+        guard token.count <= 120 else { return nil }
+
+        let operators = CharacterSet(charactersIn: "*+-/%()<>!=&|")
+        guard token.unicodeScalars.contains(where: { operators.contains($0) }) else { return nil }
+
+        guard let jsContext = sharedExpressionContext() else { return nil }
+
+        jsContext.setObject(context.variables["page"] ?? "1", forKeyedSubscript: "page" as NSString)
+        jsContext.setObject(context.variables["key"] ?? "", forKeyedSubscript: "key" as NSString)
+        jsContext.setObject(
+            context.baseURL?.absoluteString ?? "",
+            forKeyedSubscript: "baseUrl" as NSString
+        )
+
+        guard let value = jsContext.evaluateScript(token), !value.isUndefined, !value.isNull else {
+            return nil
+        }
+
+        if value.isNumber {
+            let number = value.toDouble()
+            if number == number.rounded(), abs(number) < 9e15 {
+                return String(Int64(number))
+            }
+            return String(number)
+        }
+
+        let text = value.toString() ?? ""
+        return text.isEmpty ? nil : text
     }
 
     private static func valueString(from result: RuleResult) -> String {

@@ -45,15 +45,18 @@ class AnalyzeUrl {
         var result = AnalyzedUrl(url: "")
         AppLogger.debug("AnalyzeUrl", "analyze 开始 len=\(ruleUrl.count) prefix=\(ruleUrl.prefix(80))")
         let templateContext = buildTemplateContext(key: key, page: page, source: source)
-        
+
+        // 0. 页数规则：Android 支持 <1,2,3> 形式按页取地址
+        let expandedRule = Self.expandPageRule(ruleUrl, page: page)
+
         // 1. 分离 URL 和配置 JSON
-        var urlPart = ruleUrl
+        var urlPart = expandedRule
         var configJson: [String: Any]?
         
         // 检查是否有 JSON 配置（以 , + { 分隔）
-        if let jsonStart = findJsonConfig(in: ruleUrl) {
-            urlPart = String(ruleUrl[..<jsonStart.lowerBound])
-            let jsonStr = String(ruleUrl[jsonStart.lowerBound...])
+        if let jsonStart = findJsonConfig(in: expandedRule) {
+            urlPart = String(expandedRule[..<jsonStart.lowerBound])
+            let jsonStr = String(expandedRule[jsonStart.lowerBound...])
             if let data = jsonStr.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 configJson = json
@@ -172,6 +175,28 @@ class AnalyzeUrl {
         return context
     }
     
+    /// 对齐 Android replaceKeyPageJs：`<1,2,3>` 按页码取地址，超出长度取最后一个
+    static func expandPageRule(_ ruleUrl: String, page: Int) -> String {
+        guard let start = ruleUrl.firstIndex(of: "<"),
+              let end = ruleUrl[start...].firstIndex(of: ">") else {
+            return ruleUrl
+        }
+
+        let inner = String(ruleUrl[ruleUrl.index(after: start)..<end])
+        let parts = inner
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // 必须是真的页数列表（≥2 段且都非空），避免误伤 URL 里的 "<"
+        guard parts.count > 1, parts.allSatisfy({ !$0.isEmpty }) else { return ruleUrl }
+
+        let index = min(max(page - 1, 0), parts.count - 1)
+        var expanded = ruleUrl
+        expanded.replaceSubrange(start...end, with: parts[index])
+        AppLogger.debug("AnalyzeUrl", "页数规则 page=\(page) 取第 \(index + 1) 段")
+        return expanded
+    }
+
     /// 是否已经带协议（http://、https://、file:// 等）
     private static func hasScheme(_ value: String) -> Bool {
         guard let match = value.range(

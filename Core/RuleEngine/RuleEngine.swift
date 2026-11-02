@@ -728,7 +728,7 @@ class CSSParser: RuleExecutor {
             elements = CSSParser.filterByOwnText(candidates, ownText: ownText)
         } else if parsed.selector.isEmpty {
             // 对齐 Android：前置规则为空且有索引时，索引作用于 children
-            elements = (parsed.indexMode == .none) ? [root] : root.children().array()
+            elements = (parsed.indexMode == .none) ? [root] : ((try? root.children().array()) ?? [])
         } else {
             do {
                 elements = try root.select(parsed.selector).array()

@@ -314,19 +314,19 @@ class RuleEngine {
                 continue
             }
 
-            if let lastText {
+            if let previous = lastText {
                 // 用上一段结果作为内容：HTML 重新 parse，JSON 直接作为 jsonString
                 let next = ExecutionContext()
                 next.baseURL = context.baseURL
                 next.source = context.source
                 next.variables = context.variables
-                next.htmlString = lastText
+                next.htmlString = previous
 
-                let payload = lastText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let payload = previous.trimmingCharacters(in: .whitespacesAndNewlines)
                 if payload.hasPrefix("{") || payload.hasPrefix("[") {
-                    next.jsonString = lastText
+                    next.jsonString = previous
                 } else {
-                    next.document = try? SwiftSoup.parse(lastText)
+                    next.document = try? SwiftSoup.parse(previous)
                 }
 
                 let result = try executeWithSplit(segment.text, context: next)

@@ -201,21 +201,23 @@ class RuleEngine {
             return value.isEmpty ? .none : .string(value)
         }
 
-        let operators = RuleSplitter.parseOperators(trimmed)
-
-        if let segments = operators.first(where: { $0.operator == .or })?.segments,
-           segments.count > 1 {
-            return try executeOr(segments: segments, context: context)
+        // 1) 先按 <js> / @js: 分段（Android splitSourceRule）：普通段结果作为后续段的内容
+        let jsSegments = RuleSplitter.splitByJSSegments(trimmed)
+        if jsSegments.count > 1 {
+            return try executeJSSegments(jsSegments, context: context)
         }
 
-        if let segments = operators.first(where: { $0.operator == .and })?.segments,
-           segments.count > 1 {
-            return try executeAnd(segments: segments, context: context)
-        }
-
-        if let segments = operators.first(where: { $0.operator == .format })?.segments,
-           segments.count > 1 {
-            return try executeFormat(segments: segments, context: context)
+        // 2) 组合符：种类由「最先出现」的分隔符决定，括号/引号内的分隔符不参与切分
+        let combination = RuleSplitter.splitCombination(trimmed)
+        switch combination.kind {
+        case .or:
+            return try executeOr(segments: combination.parts, context: context)
+        case .and:
+            return try executeAnd(segments: combination.parts, context: context)
+        case .cross:
+            return try executeCross(segments: combination.parts, context: context)
+        case .single:
+            break
         }
 
         guard let splitRule = RuleSplitter.split(trimmed).first else {
@@ -255,7 +257,8 @@ class RuleEngine {
         }
 
         if values.isEmpty { return .none }
-        return .string(values.joined())
+        // Android 文本结果是 \n 连接（AnalyzeByJSoup.getString 多结果 join）
+        return .string(values.joined(separator: "\n"))
     }
 
     private func executeOr(segments: [String], context: ExecutionContext) throws -> RuleResult {
@@ -268,6 +271,76 @@ class RuleEngine {
         }
 
         return .none
+    }
+
+    /// `%%`：按下标交叉合并（Android AnalyzeByJSoup.getResultList 的交叉语义）
+    private func executeCross(segments: [String], context: ExecutionContext) throws -> RuleResult {
+        var lists: [[String]] = []
+
+        for segment in segments {
+            let result = try executeWithSplit(segment, context: context)
+            context.lastResult = result
+            lists.append(flatten(result))
+        }
+
+        guard !lists.isEmpty else { return .none }
+
+        var merged: [String] = []
+        let maxCount = lists.map { $0.count }.max() ?? 0
+        for index in 0..<maxCount {
+            for list in lists where index < list.count {
+                merged.append(list[index])
+            }
+        }
+
+        return merged.isEmpty ? .none : .list(merged)
+    }
+
+    /// 逐段执行：普通段在「上一段结果」上继续解析，JS 段执行脚本并把结果交给下一段
+    private func executeJSSegments(
+        _ segments: [RuleSplitter.JSSegment],
+        context: ExecutionContext
+    ) throws -> RuleResult {
+        var lastText: String?
+
+        for segment in segments {
+            if segment.isJS {
+                if let lastText, let jsContext = context.jsContext {
+                    jsContext.setObject(lastText, forKeyedSubscript: "result" as NSString)
+                }
+                let result = try executeWithSplit("@js:" + segment.text, context: context)
+                lastText = result.text
+                context.lastResult = result
+                continue
+            }
+
+            if let lastText {
+                // 用上一段结果作为内容：HTML 重新 parse，JSON 直接作为 jsonString
+                let next = ExecutionContext()
+                next.baseURL = context.baseURL
+                next.source = context.source
+                next.variables = context.variables
+                next.htmlString = lastText
+
+                let payload = lastText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if payload.hasPrefix("{") || payload.hasPrefix("[") {
+                    next.jsonString = lastText
+                } else {
+                    next.document = try? SwiftSoup.parse(lastText)
+                }
+
+                let result = try executeWithSplit(segment.text, context: next)
+                context.variables = next.variables
+                lastText = result.text
+                context.lastResult = result
+            } else {
+                let result = try executeWithSplit(segment.text, context: context)
+                lastText = result.text
+                context.lastResult = result
+            }
+        }
+
+        return context.lastResult
     }
 
     private func executeFormat(segments: [String], context: ExecutionContext) throws -> RuleResult {

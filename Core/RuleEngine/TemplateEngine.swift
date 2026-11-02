@@ -13,9 +13,10 @@ class TemplateEngine {
     private static let placeholderRegex = try? NSRegularExpression(pattern: #"\{\{([^{}]+)\}\}"#)
 
     static func render(_ template: String, context: ExecutionContext) -> String {
-        guard template.contains("{{"), let placeholderRegex else { return template }
+        // Android makeUpRule 的 $\d 语义：从当前结果列表按下标取
+        var result = replaceDollarIndexes(template, context: context)
 
-        var result = template
+        guard result.contains("{{"), let placeholderRegex else { return result }
 
         for _ in 0..<maxRenderDepth {
             let range = NSRange(result.startIndex..., in: result)
@@ -39,6 +40,36 @@ class TemplateEngine {
         }
 
         return result
+    }
+
+    /// `$0` / `$1`：当前结果列表的第 n 项；没有对应项时保留原样
+    private static func replaceDollarIndexes(_ template: String, context: ExecutionContext) -> String {
+        guard template.contains("$") else { return template }
+
+        let values: [String]
+        switch context.lastResult {
+        case .list(let list): values = list
+        case .string(let value): values = [value]
+        case .none: return template
+        }
+
+        guard !values.isEmpty,
+              let regex = try? NSRegularExpression(pattern: #"\$(\d{1,2})"#) else {
+            return template
+        }
+
+        var output = template
+        let range = NSRange(template.startIndex..., in: template)
+
+        for match in regex.matches(in: template, range: range).reversed() {
+            guard let fullRange = Range(match.range, in: output),
+                  let indexRange = Range(match.range(at: 1), in: output),
+                  let index = Int(output[indexRange]),
+                  index < values.count else { continue }
+            output.replaceSubrange(fullRange, with: values[index])
+        }
+
+        return output
     }
 
     /// 从任意位置的规则里抽取所有 `@put:{...}`（括号配平），返回 put 块与剩余规则

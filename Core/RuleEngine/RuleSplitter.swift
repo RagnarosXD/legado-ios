@@ -106,6 +106,183 @@ class RuleSplitter {
         return (.css, trimmed)
     }
 
+    // MARK: - 组合符切分（对齐 Android RuleAnalyzer.splitRule）
+
+    enum Combination {
+        case single
+        case or
+        case and
+        case cross
+    }
+
+    /// Android 语义：分隔符种类由「最先出现的那一个」决定；
+    /// `[...]`、`(...)`、引号内的分隔符不参与切分（避免 JSONPath 过滤器里的 && / || 被切坏）
+    static func splitCombination(_ rule: String) -> (kind: Combination, parts: [String]) {
+        guard let separator = firstTopLevelSeparator(in: rule) else {
+            return (.single, [rule])
+        }
+
+        let parts = splitTopLevel(rule, separator: separator)
+        guard parts.count > 1 else { return (.single, [rule]) }
+
+        switch separator {
+        case "||": return (.or, parts)
+        case "&&": return (.and, parts)
+        default: return (.cross, parts)
+        }
+    }
+
+    private static func firstTopLevelSeparator(in rule: String) -> String? {
+        let candidates = ["&&", "||", "%%"]
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var index = rule.startIndex
+
+        while index < rule.endIndex {
+            let char = rule[index]
+
+            if let active = quote {
+                if char == active { quote = nil }
+                index = rule.index(after: index)
+                continue
+            }
+
+            switch char {
+            case "'", "\"":
+                quote = char
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth = max(0, squareDepth - 1)
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+            default:
+                break
+            }
+
+            if squareDepth == 0, parenDepth == 0, quote == nil {
+                for candidate in candidates where rule[index...].hasPrefix(candidate) {
+                    return candidate
+                }
+            }
+
+            index = rule.index(after: index)
+        }
+
+        return nil
+    }
+
+    private static func splitTopLevel(_ rule: String, separator: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var index = rule.startIndex
+
+        while index < rule.endIndex {
+            let char = rule[index]
+
+            if let active = quote {
+                if char == active { quote = nil }
+                current.append(char)
+                index = rule.index(after: index)
+                continue
+            }
+
+            if char == "'" || char == "\"" {
+                quote = char
+                current.append(char)
+                index = rule.index(after: index)
+                continue
+            }
+
+            if char == "[" { squareDepth += 1 }
+            if char == "]" { squareDepth = max(0, squareDepth - 1) }
+            if char == "(" { parenDepth += 1 }
+            if char == ")" { parenDepth = max(0, parenDepth - 1) }
+
+            if squareDepth == 0, parenDepth == 0, rule[index...].hasPrefix(separator) {
+                parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                current = ""
+                index = rule.index(index, offsetBy: separator.count)
+                continue
+            }
+
+            current.append(char)
+            index = rule.index(after: index)
+        }
+
+        parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+        return parts.filter { !$0.isEmpty }
+    }
+
+    // MARK: - JS 分段（对齐 Android splitSourceRule）
+
+    struct JSSegment {
+        var isJS: Bool
+        var text: String
+    }
+
+    /// 按 `<js>...</js>` / `@js:...` 把规则切成「普通段 / JS 段」，
+    /// 普通段在上一段结果上继续解析，JS 段执行脚本（Android AnalyzeRule.kt:593-636）
+    static func splitByJSSegments(_ rule: String) -> [JSSegment] {
+        let lowered = rule.lowercased()
+        guard lowered.contains("<js>") || lowered.contains("@js:") else {
+            return [JSSegment(isJS: false, text: rule)]
+        }
+
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?is)<js>([\w\W]*?)</js>|@js:([\w\W]*)"#
+        ) else {
+            return [JSSegment(isJS: false, text: rule)]
+        }
+
+        let ns = rule as NSString
+        let matches = regex.matches(in: rule, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return [JSSegment(isJS: false, text: rule)] }
+
+        var segments: [JSSegment] = []
+        var cursor = rule.startIndex
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: rule) else { continue }
+
+            if fullRange.lowerBound > cursor {
+                let text = String(rule[cursor..<fullRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    segments.append(JSSegment(isJS: false, text: text))
+                }
+            }
+
+            var body = ""
+            if match.range(at: 2).location != NSNotFound, let r = Range(match.range(at: 2), in: rule) {
+                body = String(rule[r])
+            } else if match.range(at: 1).location != NSNotFound, let r = Range(match.range(at: 1), in: rule) {
+                body = String(rule[r])
+            }
+
+            segments.append(JSSegment(
+                isJS: true,
+                text: body.trimmingCharacters(in: .whitespacesAndNewlines)
+            ))
+            cursor = fullRange.upperBound
+        }
+
+        if cursor < rule.endIndex {
+            let text = String(rule[cursor...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                segments.append(JSSegment(isJS: false, text: text))
+            }
+        }
+
+        return segments.isEmpty ? [JSSegment(isJS: false, text: rule)] : segments
+    }
+
     private static func parseReplace(_ rule: String) -> (
         rule: String,
         replace: (pattern: String, replacement: String, group: Int?, replaceFirst: Bool)?

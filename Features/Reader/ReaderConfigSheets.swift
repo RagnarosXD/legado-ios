@@ -110,7 +110,7 @@ struct ReadStyleSheet: View {
     @ObservedObject var viewModel: ReaderViewModel
     
     @AppStorage("readerFontSize") private var fontSize: Double = 18
-    @AppStorage("readerLineSpacing") private var lineSpacing: Double = 8
+    @AppStorage("readerLineSpacing") private var lineSpacing: Double = 12
     @AppStorage("readerParagraphSpacing") private var paragraphSpacing: Double = 12
     @AppStorage("readerLetterSpacing") private var letterSpacing: Double = 0
     @AppStorage("readerFirstLineIndent") private var firstLineIndent: Double = 2

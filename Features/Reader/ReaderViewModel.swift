@@ -38,17 +38,17 @@ class ReaderViewModel: ObservableObject {
     @Published var totalPages: Int = 0
     
     // MARK: - 阅读设置
-    @Published var fontSize: CGFloat = 18 {
+    @Published var fontSize: CGFloat = 20 {
         didSet {
             UserDefaults.standard.set(Double(fontSize), forKey: "reader.fontSize")
         }
     }
-    @Published var lineSpacing: CGFloat = 8 {
+    @Published var lineSpacing: CGFloat = 12 {
         didSet {
             UserDefaults.standard.set(Double(lineSpacing), forKey: "reader.lineSpacing")
         }
     }
-    @Published var pagePadding: EdgeInsets = EdgeInsets(top: 20, leading: 16, bottom: 20, trailing: 16) {
+    @Published var pagePadding: EdgeInsets = EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16) {
         didSet {
             UserDefaults.standard.set(Double(pagePadding.leading), forKey: "reader.pageMargin")
         }
@@ -57,10 +57,10 @@ class ReaderViewModel: ObservableObject {
     @Published var textColor: Color = .black
     
     // MARK: - 新增阅读设置
-    @Published var paragraphSpacing: CGFloat = 12 {
+    @Published var paragraphSpacing: CGFloat = 2 {
         didSet { UserDefaults.standard.set(Double(paragraphSpacing), forKey: "reader.paragraphSpacing") }
     }
-    @Published var letterSpacing: CGFloat = 0 {
+    @Published var letterSpacing: CGFloat = 0.1 {
         didSet { UserDefaults.standard.set(Double(letterSpacing), forKey: "reader.letterSpacing") }
     }
     /// 段首缩进字数（中文习惯 2 字）
@@ -68,11 +68,11 @@ class ReaderViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(Double(firstLineIndentChars), forKey: "reader.firstLineIndent") }
     }
     /// 行高倍数
-    @Published var lineHeightMultiple: CGFloat = 1.15 {
+    @Published var lineHeightMultiple: CGFloat = 1.0 {
         didSet { UserDefaults.standard.set(Double(lineHeightMultiple), forKey: "reader.lineHeightMultiple") }
     }
     /// 两端对齐
-    @Published var textJustified: Bool = false {
+    @Published var textJustified: Bool = true {
         didSet { UserDefaults.standard.set(textJustified, forKey: "reader.justified") }
     }
     /// 字体族（为空用系统字体）
@@ -141,9 +141,10 @@ class ReaderViewModel: ObservableObject {
         return .system(size: fontSize)
     }
 
-    /// 滚动模式下把「行高倍数」折算成额外行距（SwiftUI Text 不支持 lineHeightMultiple）
+    /// 滚动模式的额外行距：字体行高 × (lineSpacingExtra/10)，与 Android 行高模型一致
     var effectiveLineSpacing: CGFloat {
-        max(0, lineSpacing + (lineHeightMultiple - 1) * fontSize)
+        let fontLineHeight = UIFont.systemFont(ofSize: fontSize).lineHeight
+        return max(0, fontLineHeight * (lineSpacing / 10))
     }
 
     /// 当前排版配置（分页与渲染共用）
@@ -165,11 +166,10 @@ class ReaderViewModel: ObservableObject {
 
         return PageConfig.from(
             fontSize: fontSize,
-            lineSpacing: lineSpacing,
-            paragraphSpacing: paragraphSpacing,
-            letterSpacing: letterSpacing,
+            lineSpacingExtra: lineSpacing,
+            paragraphSpacingExtra: paragraphSpacing,
+            letterSpacingEm: letterSpacing,
             firstLineIndentChars: firstLineIndentChars,
-            lineHeightMultiple: lineHeightMultiple,
             justified: textJustified,
             padding: UIEdgeInsets(
                 top: pagePadding.top + topInset,

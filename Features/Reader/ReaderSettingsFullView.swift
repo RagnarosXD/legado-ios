@@ -11,7 +11,7 @@ struct ReaderSettingsFullView: View {
     @Environment(\.dismiss) var dismiss
 
     @AppStorage("reader.fontSize") private var storedFontSize: Double = 18
-    @AppStorage("reader.lineSpacing") private var storedLineSpacing: Double = 8
+    @AppStorage("reader.lineSpacing") private var storedLineSpacing: Double = 12
     @AppStorage("reader.paragraphSpacing") private var storedParagraphSpacing: Double = 12
     @AppStorage("reader.pageMargin") private var storedPageMargin: Double = 16
     @AppStorage("reader.brightness") private var storedBrightness: Double = 1.0
@@ -23,7 +23,7 @@ struct ReaderSettingsFullView: View {
     
     // 阅读配置
     @State private var fontSize: Double = 18
-    @State private var lineSpacing: Double = 8
+    @State private var lineSpacing: Double = 12
     @State private var paragraphSpacing: Double = 12
     @State private var pageMargin: Double = 16
     @State private var brightness: Double = 1.0

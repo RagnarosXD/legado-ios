@@ -12,22 +12,58 @@ import UIKit
 
 // MARK: - 分页配置
 
+/// 排版参数，字段与 Android ReadBookConfig.Config 一一对应
+/// 参见 `ReadBookConfig.kt:907-989`、`ChapterProvider.kt:304-329`、`TextChapterLayout.kt:1120-1357`
 struct PageConfig {
-    var fontSize: CGFloat = 18
-    var lineSpacing: CGFloat = 8
-    var paragraphSpacing: CGFloat = 12
-    /// 字间距（负值收紧，正值拉开），单位 pt
-    var letterSpacing: CGFloat = 0
-    /// 首行缩进，单位 pt（调用方按「字数 × 字号」换算）
-    var firstLineIndent: CGFloat = 0
-    /// 行高倍数，1.0 为字体原始行高
-    var lineHeightMultiple: CGFloat = 1.0
-    /// 两端对齐（中文正文常用）
-    var justified: Bool = false
-    var textColor: UIColor = .label
-    var margins: UIEdgeInsets = UIEdgeInsets(top: 20, left: 16, bottom: 20, right: 16)
+    /// 正文字号（Android textSize，默认 20sp）
+    var fontSize: CGFloat = 20
+    /// Android lineSpacingExtra：整数，除以 10 得到「行高倍数增量」（默认 12 → 行高 1.2 倍）
+    var lineSpacingExtra: CGFloat = 12
+    /// Android paragraphSpacing：整数，除以 10 后乘以行高（默认 2 → 0.2 倍行高）
+    var paragraphSpacingExtra: CGFloat = 2
+    /// Android letterSpacing：em 倍数（默认 0.1）
+    var letterSpacingEm: CGFloat = 0.1
+    /// 首行缩进字符数（Android 用两个全角空格 "　　"）
+    var firstLineIndentChars: CGFloat = 2
+    /// 两端对齐（Android textFullJustify 默认 true）
+    var justified: Bool = true
+    var textColor: UIColor = UIColor(red: 0x3E / 255, green: 0x3D / 255, blue: 0x3B / 255, alpha: 1)
+    /// 页面边距（Android paddingTop/Bottom 6dp、Left/Right 16dp）
+    var margins: UIEdgeInsets = UIEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
     var containerSize: CGSize
     var font: UIFont
+
+    /// 字体自身行高（ascent + descent + leading），对应 Android `fontMetrics.descent - ascent + leading`
+    var fontLineHeight: CGFloat {
+        max(1, font.lineHeight)
+    }
+
+    /// 实际行高 = 字体行高 × (1 + lineSpacingExtra/10)
+    var lineHeight: CGFloat {
+        fontLineHeight * (1 + max(0, lineSpacingExtra) / 10)
+    }
+
+    /// CoreText 需要的额外行距（在字体行高之外补的差值）
+    var coreTextLineSpacing: CGFloat {
+        max(0, lineHeight - fontLineHeight)
+    }
+
+    /// 段间距 = 行高 × paragraphSpacingExtra/10
+    var paragraphSpacing: CGFloat {
+        lineHeight * max(0, paragraphSpacingExtra) / 10
+    }
+
+    /// 首行缩进 = 两个全角空格的实测宽度（Android `measureText(paragraphIndent)`）
+    var firstLineIndent: CGFloat {
+        guard firstLineIndentChars > 0 else { return 0 }
+        let width = ("\u{3000}" as NSString).size(withAttributes: [.font: font]).width
+        return width * firstLineIndentChars
+    }
+
+    /// 字距 = letterSpacingEm × fontSize
+    var kern: CGFloat {
+        letterSpacingEm * fontSize
+    }
 
     /// 实际可用于排版的区域大小
     var contentSize: CGSize {
@@ -39,19 +75,18 @@ struct PageConfig {
 
     /// 便捷构造：用系统字体
     static func `default`(containerSize: CGSize) -> PageConfig {
-        let font = UIFont.systemFont(ofSize: 18)
+        let font = UIFont.systemFont(ofSize: 20)
         return PageConfig(containerSize: containerSize, font: font)
     }
 
     /// 从 ReaderViewModel 设置构造
     static func from(
         fontSize: CGFloat,
-        lineSpacing: CGFloat,
-        paragraphSpacing: CGFloat = 12,
-        letterSpacing: CGFloat = 0,
+        lineSpacingExtra: CGFloat = 12,
+        paragraphSpacingExtra: CGFloat = 2,
+        letterSpacingEm: CGFloat = 0.1,
         firstLineIndentChars: CGFloat = 2,
-        lineHeightMultiple: CGFloat = 1.0,
-        justified: Bool = false,
+        justified: Bool = true,
         padding: UIEdgeInsets,
         containerSize: CGSize,
         fontFamily: String? = nil
@@ -64,11 +99,10 @@ struct PageConfig {
         }
         return PageConfig(
             fontSize: fontSize,
-            lineSpacing: lineSpacing,
-            paragraphSpacing: paragraphSpacing,
-            letterSpacing: letterSpacing,
-            firstLineIndent: max(0, firstLineIndentChars) * fontSize,
-            lineHeightMultiple: max(0.5, lineHeightMultiple),
+            lineSpacingExtra: lineSpacingExtra,
+            paragraphSpacingExtra: paragraphSpacingExtra,
+            letterSpacingEm: letterSpacingEm,
+            firstLineIndentChars: firstLineIndentChars,
             justified: justified,
             margins: padding,
             containerSize: containerSize,
@@ -205,15 +239,16 @@ final class PageSplitter {
     /// 分页与渲染共用这一份属性，避免「算出来的页」和「画出来的页」不一致
     static func attributedText(text: String, config: PageConfig) -> NSAttributedString {
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = config.lineSpacing
+        // Android：行高 = 字体行高 × (1 + lineSpacingExtra/10)，这里用额外行距补足差值
+        paragraphStyle.lineSpacing = config.coreTextLineSpacing
+        // Android：段距 = 行高 × paragraphSpacing/10
         paragraphStyle.paragraphSpacing = config.paragraphSpacing
-        paragraphStyle.lineHeightMultiple = config.lineHeightMultiple
         paragraphStyle.alignment = config.justified ? .justified : .natural
         paragraphStyle.lineBreakMode = .byWordWrapping
         // 中文用 pushOut：允许标点挤压，避免行尾大量留白或标点跑到行首
         paragraphStyle.lineBreakStrategy = .pushOut
 
-        // 首行缩进（段首两字），后续行不缩进
+        // 首行缩进：两个全角空格的实际宽度（与 Android 插入 "　　" 等价）
         paragraphStyle.firstLineHeadIndent = config.firstLineIndent
         paragraphStyle.headIndent = 0
 
@@ -222,8 +257,9 @@ final class PageSplitter {
             .paragraphStyle: paragraphStyle,
             .foregroundColor: config.textColor
         ]
-        if config.letterSpacing != 0 {
-            attributes[.kern] = config.letterSpacing
+        // Android letterSpacing 是 em 倍数，转换为 pt
+        if config.kern != 0 {
+            attributes[.kern] = config.kern
         }
 
         return NSAttributedString(string: normalizeText(text), attributes: attributes)
@@ -311,11 +347,10 @@ final class PageSplitCache {
     private func configHashValue(_ config: PageConfig) -> Int {
         var hasher = Hasher()
         hasher.combine(config.fontSize)
-        hasher.combine(config.lineSpacing)
-        hasher.combine(config.paragraphSpacing)
-        hasher.combine(config.letterSpacing)
-        hasher.combine(config.firstLineIndent)
-        hasher.combine(config.lineHeightMultiple)
+        hasher.combine(config.lineSpacingExtra)
+        hasher.combine(config.paragraphSpacingExtra)
+        hasher.combine(config.letterSpacingEm)
+        hasher.combine(config.firstLineIndentChars)
         hasher.combine(config.justified)
         hasher.combine(config.margins.top)
         hasher.combine(config.margins.left)

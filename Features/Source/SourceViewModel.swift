@@ -8,10 +8,53 @@
 import Foundation
 import CoreData
 
+enum SourceFilter: String, CaseIterable, Identifiable {
+    case all
+    case text
+    case audio
+    case image
+    case file
+    case login
+    case explore
+    case disabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .text: return "文本"
+        case .audio: return "有声"
+        case .image: return "漫画"
+        case .file: return "文件"
+        case .login: return "需登录"
+        case .explore: return "有发现"
+        case .disabled: return "已停用"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .text: return "text.alignleft"
+        case .audio: return "speaker.wave.2"
+        case .image: return "photo"
+        case .file: return "doc"
+        case .login: return "person.badge.key"
+        case .explore: return "safari"
+        case .disabled: return "pause.circle"
+        }
+    }
+}
+
 @MainActor
 class SourceViewModel: ObservableObject {
     @Published var sources: [BookSource] = []
     @Published var errorMessage: String?
+    @Published var activeFilter: SourceFilter = .all
+
+    /// 需要登录的书源（声明 + 规则引用的并集），加载后一次算好，避免每次筛选重复解析规则
+    @Published private(set) var loginSourceIds: Set<UUID> = []
     
     func loadSources() async {
         do {
@@ -20,8 +63,48 @@ class SourceViewModel: ObservableObject {
             request.includesPendingChanges = false
             
             sources = try CoreDataStack.shared.viewContext.fetch(request)
+            rebuildLoginIndex()
         } catch {
             errorMessage = "加载书源失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 扫描需要登录的书源（声明字段 + 规则里引用的登录 API）
+    private func rebuildLoginIndex() {
+        var ids = Set<UUID>()
+        for source in sources where source.requiresLogin {
+            ids.insert(source.sourceId)
+        }
+        loginSourceIds = ids
+        if !ids.isEmpty {
+            AppLogger.info("Source", "需登录书源 \(ids.count)/\(sources.count)")
+        }
+    }
+
+    /// 当前筛选下的书源
+    var filteredSources: [BookSource] {
+        switch activeFilter {
+        case .all: return sources
+        case .text: return sources.filter { $0.bookSourceType == 0 }
+        case .audio: return sources.filter { $0.bookSourceType == 1 }
+        case .image: return sources.filter { $0.bookSourceType == 2 }
+        case .file: return sources.filter { $0.bookSourceType == 3 }
+        case .login: return sources.filter { loginSourceIds.contains($0.sourceId) }
+        case .explore: return sources.filter { $0.hasExplore }
+        case .disabled: return sources.filter { !$0.enabled }
+        }
+    }
+
+    func count(for filter: SourceFilter) -> Int {
+        switch filter {
+        case .all: return sources.count
+        case .text: return sources.filter { $0.bookSourceType == 0 }.count
+        case .audio: return sources.filter { $0.bookSourceType == 1 }.count
+        case .image: return sources.filter { $0.bookSourceType == 2 }.count
+        case .file: return sources.filter { $0.bookSourceType == 3 }.count
+        case .login: return loginSourceIds.count
+        case .explore: return sources.filter { $0.hasExplore }.count
+        case .disabled: return sources.filter { !$0.enabled }.count
         }
     }
     

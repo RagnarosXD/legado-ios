@@ -29,9 +29,7 @@ struct SourceManageView: View {
     @State private var exportDocument = JSONDataDocument()
     @State private var exportFileName = "bookSource"
 
-    // 筛选（对标 Android 书源管理的筛选菜单）
-    @State private var filterType: Int32? = nil
-    @State private var filterEnabled: Bool? = nil
+    // 筛选由 viewModel.activeFilter 驱动
     
     var body: some View {
         ZStack {
@@ -57,6 +55,9 @@ struct SourceManageView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                filterBar
+            }
             .navigationTitle("书源管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -74,19 +75,6 @@ struct SourceManageView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
                         Menu {
-                            Picker("类型", selection: $filterType) {
-                                Text("全部类型").tag(Int32?.none)
-                                Text("文本").tag(Int32?(0))
-                                Text("有声").tag(Int32?(1))
-                                Text("漫画").tag(Int32?(2))
-                                Text("文件").tag(Int32?(3))
-                            }
-                            Picker("状态", selection: $filterEnabled) {
-                                Text("全部状态").tag(Bool?.none)
-                                Text("已启用").tag(Bool?(true))
-                                Text("已停用").tag(Bool?(false))
-                            }
-                            Divider()
                             Button {
                                 inferTypes()
                             } label: {
@@ -190,13 +178,53 @@ struct SourceManageView: View {
     
     // MARK: - 筛选与分组
 
-    /// 当前筛选条件下的书源
     private var filteredSources: [BookSource] {
-        viewModel.sources.filter { source in
-            if let filterType, source.bookSourceType != filterType { return false }
-            if let filterEnabled, source.enabled != filterEnabled { return false }
-            return true
+        viewModel.filteredSources
+    }
+
+    /// 顶部横向筛选条：文本 / 有声 / 漫画 / 文件 / 需登录 / 有发现 / 已停用
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(SourceFilter.allCases) { filter in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            viewModel.activeFilter = filter
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: filter.icon)
+                                .font(.system(size: 10))
+                            Text(filter.title)
+                                .font(.caption)
+                            Text("\(viewModel.count(for: filter))")
+                                .font(.caption2)
+                                .opacity(0.7)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(
+                                viewModel.activeFilter == filter
+                                    ? Color.accentColor.opacity(0.16)
+                                    : Color(.secondarySystemBackground)
+                            )
+                        )
+                        .overlay(
+                            Capsule().stroke(
+                                viewModel.activeFilter == filter ? Color.accentColor : Color.clear,
+                                lineWidth: 1
+                            )
+                        )
+                        .foregroundColor(viewModel.activeFilter == filter ? .accentColor : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
+        .background(.bar)
     }
 
     private func inferTypes() {
@@ -447,6 +475,18 @@ struct SourceItemView: View {
                         Image(systemName: "photo")
                             .font(.caption)
                             .foregroundColor(.orange)
+                    }
+
+                    // 能力标记：需登录 / 有发现
+                    if source.requiresLogin {
+                        Image(systemName: "person.badge.key")
+                            .font(.caption)
+                            .foregroundColor(.purple)
+                    }
+                    if source.hasExplore {
+                        Image(systemName: "safari")
+                            .font(.caption)
+                            .foregroundColor(.teal)
                     }
                 }
                 

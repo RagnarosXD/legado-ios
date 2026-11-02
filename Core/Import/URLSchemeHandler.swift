@@ -163,6 +163,7 @@ struct URLSchemeHandler {
             source.header = raw["header"] as? String
             source.loginUrl = raw["loginUrl"] as? String
             source.loginCheckJs = raw["loginCheckJs"] as? String
+            source.loginUi = raw["loginUi"] as? String
             source.jsLib = raw["jsLib"] as? String
             source.bookUrlPattern = raw["bookUrlPattern"] as? String
             source.enabled = raw["enabled"] as? Bool ?? true

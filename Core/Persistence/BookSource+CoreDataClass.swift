@@ -277,3 +277,51 @@ extension BookSource {
         return source
     }
 }
+
+// MARK: - 书源能力识别（筛选与扫描用）
+
+extension BookSource {
+
+    /// 官方声明需要登录：loginUrl / loginUi / loginCheckJs 任一非空
+    var declaredLogin: Bool {
+        let fields = [loginUrl, loginUi, loginCheckJs]
+        return fields.contains { !($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// 规则里引用了登录相关 API（未声明但实际依赖登录）
+    var usesLoginInRules: Bool {
+        let keywords = [
+            "java.getLoginInfo", "java.putLoginInfo", "java.hasLogin",
+            "java.getHeaderMap", "java.getLoginHeader", "java.login(",
+            "source.getLoginInfo"
+        ]
+        let text = ruleTextForScan
+        return keywords.contains { text.contains($0) }
+    }
+
+    var requiresLogin: Bool { declaredLogin || usesLoginInRules }
+
+    /// 是否声明了发现页
+    var hasExplore: Bool {
+        !(exploreUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 拼出用于能力扫描的规则文本（规则字段是 JSON Data，先转字符串）
+    var ruleTextForScan: String {
+        var parts: [String] = [
+            bookSourceUrl,
+            searchUrl ?? "",
+            exploreUrl ?? "",
+            header ?? "",
+            jsLib ?? ""
+        ]
+
+        for data in [ruleSearchData, ruleExploreData, ruleBookInfoData, ruleTocData, ruleContentData].compactMap({ $0 }) {
+            if let text = String(data: data, encoding: .utf8) {
+                parts.append(text)
+            }
+        }
+
+        return parts.joined(separator: "\n")
+    }
+}

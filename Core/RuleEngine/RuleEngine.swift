@@ -20,6 +20,8 @@ class ElementContext {
     var variables: [String: String] = [:]
     /// XPath 命中的原始节点（保留节点身份，避免 toHTML 二次解析丢结构）
     var xpathNode: XMLElement?
+    /// 初始结果：URL 规则里的 `@result` / JS 段需要拿到上一段的值
+    var initialResult: String?
 
     init(element: Any, baseUrl: String? = nil, source: BookSource? = nil) {
         self.element = element
@@ -629,6 +631,9 @@ class RuleEngine {
         context.baseURL = (baseUrl ?? elementContext.baseUrl).flatMap { URL(string: $0) }
         context.source = elementContext.source
         context.variables = elementContext.variables
+        if let initial = elementContext.initialResult {
+            context.lastResult = .string(initial)
+        }
 
         // XPath 命中的节点：字段规则只做取值时直接从节点读（对齐 Android 节点身份语义）
         if let node = elementContext.xpathNode {

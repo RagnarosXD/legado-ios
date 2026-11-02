@@ -240,12 +240,16 @@ class TemplateEngine {
 
     /// 只对「看起来像表达式」的 token 求值：含运算符、长度可控
     private static func evaluateExpression(_ token: String, context: ExecutionContext) -> String? {
-        guard token.count <= 120 else { return nil }
+        guard token.count <= 200 else { return nil }
 
         let operators = CharacterSet(charactersIn: "*+-/%()<>!=&|")
-        guard token.unicodeScalars.contains(where: { operators.contains($0) }) else { return nil }
+        let hasOperator = token.unicodeScalars.contains(where: { operators.contains($0) })
+        // Java 风格调用（java.xxx / cookie.xxx / source.xxx）也必须真正执行
+        let hasCall = token.contains(".") || token.contains("(")
+        guard hasOperator || hasCall else { return nil }
 
-        guard let jsContext = sharedExpressionContext() else { return nil }
+        // 用 ExecutionContext 自带的 JSContext：java / source / cookie 已在其中注入
+        guard let jsContext = context.jsContext else { return nil }
 
         jsContext.setObject(context.variables["page"] ?? "1", forKeyedSubscript: "page" as NSString)
         jsContext.setObject(context.variables["key"] ?? "", forKeyedSubscript: "key" as NSString)
@@ -253,6 +257,7 @@ class TemplateEngine {
             context.baseURL?.absoluteString ?? "",
             forKeyedSubscript: "baseUrl" as NSString
         )
+        jsContext.setObject(context.lastResult.text, forKeyedSubscript: "result" as NSString)
 
         guard let value = jsContext.evaluateScript(token), !value.isUndefined, !value.isNull else {
             return nil

@@ -17,6 +17,16 @@ struct AnalyzedUrl {
     var headers: [String: String] = [:]
     var charset: String?
     var webView: Bool = false
+    /// 以下字段对齐 Android AnalyzeUrl 的 `,{...}` 配置全集
+    var retry: Int = 0
+    var timeout: Int = 0
+    var type: String?
+    var dnsIp: String?
+    var followRedirects: Bool = true
+    var webJs: String?
+    var serverID: String?
+    var webViewDelayTime: Int = 0
+    var origin: String?
     
     enum HTTPMethod: String {
         case get = "GET"
@@ -46,8 +56,11 @@ class AnalyzeUrl {
         AppLogger.debug("AnalyzeUrl", "analyze 开始 len=\(ruleUrl.count) prefix=\(ruleUrl.prefix(80))")
         let templateContext = buildTemplateContext(key: key, page: page, source: source)
 
-        // 0. 页数规则：Android 支持 <1,2,3> 形式按页取地址
-        let expandedRule = Self.expandPageRule(ruleUrl, page: page)
+        // 0. Android analyzeJs：整条 URL 里的 <js> / @js: 段先执行，普通段用 @result 承接
+        let jsResolvedRule = Self.analyzeJS(ruleUrl, source: source, baseUrl: baseUrl)
+
+        // 0.1 页数规则：Android 支持 <1,2,3> 形式按页取地址
+        let expandedRule = Self.expandPageRule(jsResolvedRule, page: page)
 
         // 1. 分离 URL 和配置 JSON
         var urlPart = expandedRule
@@ -95,7 +108,42 @@ class AnalyzeUrl {
         if let webView = configJson?["webView"] as? Bool {
             result.webView = webView
         }
+
+        // 7.1 其余选项（对齐 AnalyzeUrl.kt:267-299）
+        if let value = configJson?["retry"] as? NSNumber {
+            result.retry = max(0, min(value.intValue, 3))
+        }
+        if let value = configJson?["timeout"] as? NSNumber {
+            result.timeout = max(0, value.intValue)
+        }
+        result.type = configJson?["type"] as? String
+        result.dnsIp = configJson?["dnsIp"] as? String ?? (configJson?["resolveIp"] as? String)
+        if let value = configJson?["followRedirects"] as? Bool {
+            result.followRedirects = value
+        }
+        result.webJs = configJson?["webJs"] as? String
+        result.serverID = configJson?["serverID"] as? String
+        result.origin = configJson?["origin"] as? String
+        if let value = configJson?["webViewDelayTime"] as? NSNumber {
+            result.webViewDelayTime = value.intValue
+        }
+
+        // js：用脚本改写最终 URL（Android: evalJS(js, url) 回填）
+        if let js = configJson?["js"] as? String, !js.isEmpty {
+            let rewritten = Self.evaluateJS(js, initialResult: urlPart, source: source, baseUrl: baseUrl)
+            if !rewritten.isEmpty {
+                urlPart = rewritten
+            }
+        }
         
+        // 7.2 bodyJs：用脚本改写请求体
+        if let bodyJs = configJson?["bodyJs"] as? String, !bodyJs.isEmpty, let body = result.body {
+            let rewritten = Self.evaluateJS(bodyJs, initialResult: body, source: source, baseUrl: baseUrl)
+            if !rewritten.isEmpty {
+                result.body = rewritten
+            }
+        }
+
         // 8. 处理 URL 中的 POST 参数（用 , 分隔的旧格式）
         if result.method == .get && urlPart.contains(",{") == false {
             // 检查是否是 URL,body 的旧格式
@@ -107,6 +155,12 @@ class AnalyzeUrl {
             }
         }
         
+        // 8.5 Android：javascript: 开头的地址直接置空，避免发出畸形请求
+        if urlPart.lowercased().hasPrefix("javascript") {
+            AppLogger.debug("AnalyzeUrl", "javascript: 地址已置空")
+            urlPart = ""
+        }
+
         // 9. 处理相对 URL
         // 注意：不能用 hasPrefix("http") 判断绝对地址——协议相对地址（//host/path）和被误拼的
         // 绝对地址都会漏过去，之前就出现过 "https://站点/book-detail/https://另一站/..." 这种畸形 URL。
@@ -139,6 +193,55 @@ class AnalyzeUrl {
         return result
     }
     
+    // MARK: - URL 级 JS（Android analyzeJs）
+
+    private static let jsEngine = RuleEngine()
+
+    /// 对齐 Android AnalyzeUrl.analyzeJs：
+    /// `<js>...</js>` / `@js:...` 段执行脚本，普通段把 `@result` 替换成当前值后拼接
+    static func analyzeJS(_ ruleUrl: String, source: BookSource?, baseUrl: String?) -> String {
+        let lowered = ruleUrl.lowercased()
+        guard lowered.contains("<js>") || lowered.contains("@js:") else { return ruleUrl }
+
+        let segments = RuleSplitter.splitByJSSegments(ruleUrl)
+        guard segments.count > 1 else { return ruleUrl }
+
+        var result = ""
+        for segment in segments {
+            if segment.isJS {
+                result = evaluateJS(segment.text, initialResult: result, source: source, baseUrl: baseUrl)
+            } else {
+                var text = segment.text
+                if !result.isEmpty {
+                    text = text.replacingOccurrences(of: "@result", with: result)
+                }
+                result += text
+            }
+        }
+
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? ruleUrl : trimmed
+    }
+
+    /// 执行一段 JS，`result` 变量由 initialResult 注入（Android evalJS 的 result 绑定）
+    static func evaluateJS(
+        _ script: String,
+        initialResult: String,
+        source: BookSource?,
+        baseUrl: String?
+    ) -> String {
+        let context = ElementContext(element: "", baseUrl: baseUrl, source: source)
+        context.initialResult = initialResult
+
+        let value = (try? jsEngine.getString(
+            ruleStr: "@js:" + script,
+            elementContext: context,
+            baseUrl: baseUrl
+        )) ?? ""
+
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - 变量替换
     
     /// 替换 URL 中的变量占位符
@@ -255,8 +358,12 @@ class AnalyzeUrl {
 
         var request = URLRequest(url: url)
         request.httpMethod = analyzedUrl.method.rawValue
-        // 多书源搜索时要快速失败，30 秒会让几百个源排到天荒地老
-        request.timeoutInterval = 12
+        // 多书源搜索时要快速失败；书源配置了 timeout（毫秒）则优先使用
+        if analyzedUrl.timeout > 0 {
+            request.timeoutInterval = TimeInterval(analyzedUrl.timeout) / 1000
+        } else {
+            request.timeoutInterval = 12
+        }
         
         // 设置 headers
         for (key, value) in analyzedUrl.headers {
@@ -265,9 +372,16 @@ class AnalyzeUrl {
         
         // 设置 body
         if let body = analyzedUrl.body {
-            request.httpBody = body.data(using: .utf8)
-            if request.value(forHTTPHeaderField: "Content-Type") == nil {
+            let hasContentType = request.value(forHTTPHeaderField: "Content-Type") != nil
+            let looksLikeJSON = body.hasPrefix("{") || body.hasPrefix("[")
+            let looksLikeXML = body.hasPrefix("<")
+
+            if !hasContentType, !looksLikeJSON, !looksLikeXML, analyzedUrl.method == .post {
+                // Android analyzeFields：表单体逐字段编码（空格→+，中文百分号编码）
+                request.httpBody = encodeFormBody(body, charsetName: analyzedUrl.charset)
                 request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            } else {
+                request.httpBody = body.data(using: .utf8)
             }
         }
 
@@ -280,7 +394,31 @@ class AnalyzeUrl {
         let startedAt = Date()
         AppLogger.debug("HTTP", "\(request.httpMethod ?? "GET") \(url.absoluteString.prefix(200))")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // 重试：对齐 Android urlOption.retry（0~3）
+        var attempt = 0
+        var data = Data()
+        var rawResponse: URLResponse?
+        var lastError: Error?
+
+        while attempt <= analyzedUrl.retry {
+            do {
+                let (payload, resp) = try await URLSession.shared.data(for: request)
+                data = payload
+                rawResponse = resp
+                lastError = nil
+                break
+            } catch {
+                lastError = error
+                attempt += 1
+                if attempt <= analyzedUrl.retry {
+                    AppLogger.warn("HTTP", "重试 \(attempt)/\(analyzedUrl.retry) url=\(url.absoluteString.prefix(120))")
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                }
+            }
+        }
+
+        if let lastError { throw lastError }
+        guard let response = rawResponse else { throw URLError(.unknown) }
 
         // 处理编码
         let encoding = detectEncoding(data: data, response: response, charset: analyzedUrl.charset)
@@ -294,6 +432,35 @@ class AnalyzeUrl {
         return (body, finalUrl)
     }
     
+    /// 表单体逐字段编码（对齐 Android encodeParams：`&` 分段、`=` 分键值、空格→`+`）
+    static func encodeFormBody(_ body: String, charsetName: String?) -> Data? {
+        let pairs = body.split(separator: "&", omittingEmptySubsequences: false)
+        var encoded: [String] = []
+
+        for pair in pairs {
+            let text = String(pair)
+            let parts = text.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let key = parts.first.map(String.init) ?? ""
+            let value = parts.count > 1 ? String(parts[1]) : ""
+
+            if value.isEmpty {
+                encoded.append(percentEncodeForm(key))
+            } else {
+                encoded.append(percentEncodeForm(key) + "=" + percentEncodeForm(value))
+            }
+        }
+
+        return encoded.joined(separator: "&").data(using: .utf8)
+    }
+
+    /// RFC3986 严格编码，空格按 form 规则转成 `+`
+    private static func percentEncodeForm(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "*-._")
+        let encoded = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+        return encoded.replacingOccurrences(of: "%20", with: "+")
+    }
+
     /// 补全 URL 中未编码的字符（中文、空格、换行等），已编码的 %XX 保持不变
     static func encodeIfNeeded(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -19,7 +19,7 @@ class ElementContext {
     /// 书源变量：同一本书的多条规则之间共享（@put / @get / java.put）
     var variables: [String: String] = [:]
     /// XPath 命中的原始节点（保留节点身份，避免 toHTML 二次解析丢结构）
-    var xpathNode: Kanna.XMLElement?
+    var xpathNode: XMLElement?
 
     init(element: Any, baseUrl: String? = nil, source: BookSource? = nil) {
         self.element = element
@@ -975,7 +975,7 @@ class XPathParser: RuleExecutor {
     var kind: RuleKind { .xpath }
 
     /// 从保留的 Kanna 节点直接取值（text / html / 属性）
-    static func value(from node: Kanna.XMLElement, attr: String) -> String {
+    static func value(from node: XMLElement, attr: String) -> String {
         switch attr.lowercased() {
         case "text", "owntext", "":
             return node.text ?? ""

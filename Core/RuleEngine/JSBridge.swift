@@ -2,7 +2,7 @@ import Foundation
 import JavaScriptCore
 import CryptoKit
 
-#if canImport(CommonCrypto)
+#if os(iOS)
 import CommonCrypto
 #endif
 
@@ -518,16 +518,21 @@ extension JSBridge {
         }
         javaObject.setObject(hexDecodeBlock, forKeyedSubscript: "hexDecodeToString" as NSString)
 
-        let strToBytesBlock: @convention(block) (String) -> [Int] = { text in
-            Array(text.utf8).map { Int($0) }
+        let strToBytesBlock: @convention(block) (String) -> String = { text in
+            let numbers = Array(text.utf8).map { Int($0) }
+            let data = (try? JSONSerialization.data(withJSONObject: numbers)) ?? Data()
+            return String(decoding: data, as: UTF8.self)
         }
-        javaObject.setObject(strToBytesBlock, forKeyedSubscript: "strToBytes" as NSString)
+        javaObject.setObject(strToBytesBlock, forKeyedSubscript: "__strToBytes" as NSString)
 
-        let bytesToStrBlock: @convention(block) (NSArray) -> String = { array in
-            let bytes = array.compactMap { ($0 as? NSNumber)?.uint8Value }
-            return String(decoding: bytes, as: UTF8.self)
+        let bytesToStrBlock: @convention(block) (String) -> String = { json in
+            guard let data = json.data(using: .utf8),
+                  let numbers = try? JSONSerialization.jsonObject(with: data) as? [NSNumber] else {
+                return ""
+            }
+            return String(decoding: numbers.map { $0.uint8Value }, as: UTF8.self)
         }
-        javaObject.setObject(bytesToStrBlock, forKeyedSubscript: "bytesToStr" as NSString)
+        javaObject.setObject(bytesToStrBlock, forKeyedSubscript: "__bytesToStr" as NSString)
 
         // 摘要
         let digestHexBlock: @convention(block) (String, String) -> String = { text, algorithm in
@@ -603,7 +608,9 @@ extension JSBridge {
 
         // cookie
         let cookieBlock: @convention(block) (String) -> String = { url in
-            CookieStore.shared.cookieString(for: url) ?? ""
+            guard let cookieURL = URL(string: url) else { return "" }
+            let cookies = HTTPCookieStorage.shared.cookies(for: cookieURL) ?? []
+            return cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
         }
         javaObject.setObject(cookieBlock, forKeyedSubscript: "getCookie" as NSString)
 
@@ -637,6 +644,12 @@ extension JSBridge {
                 java.getElement = function (rule) {
                     var raw = java.__getElements(s(rule));
                     try { var list = JSON.parse(raw); return list.length ? list[0] : null; } catch (e) { return null; }
+                };
+                java.strToBytes = function (text) {
+                    try { return JSON.parse(java.__strToBytes(s(text))); } catch (e) { return []; }
+                };
+                java.bytesToStr = function (arr) {
+                    try { return java.__bytesToStr(JSON.stringify(arr || [])); } catch (e) { return ''; }
                 };
                 java.log = (function (original) {
                     return function (msg) { if (original) { original(s(msg)); } return msg; };
@@ -686,7 +699,7 @@ enum CryptoSupport {
         let data = Data(text.utf8)
         let name = algorithm.uppercased()
 
-        #if canImport(CryptoKit)
+        #if os(iOS)
         switch name {
         case "SHA-1", "SHA1":
             return Data(Insecure.SHA1.hash(data: data))
@@ -718,7 +731,7 @@ enum CryptoSupport {
         let data = Data(text.utf8)
         let keyData = Data(key.utf8)
 
-        #if canImport(CryptoKit)
+        #if os(iOS)
         let name = algorithm.uppercased()
         switch name {
         case "HmacSHA1", "SHA-1", "SHA1", "HmacSHA-1":
@@ -748,21 +761,28 @@ enum CryptoSupport {
 
     static func symmetricDecrypt(_ data: String, key: String, transformation: String, iv: String) -> String {
         let cipher = hexToData(data) ?? Data(base64Encoded: data) ?? Data()
-        guard let plain = crypt(operation: kCCDecrypt, data: cipher, key: key, transformation: transformation, iv: iv) else {
+        guard let plain = crypt(encrypt: false, data: cipher, key: key, transformation: transformation, iv: iv) else {
+            return ""
+        }
+        return String(decoding: plain, as: UTF8.self)
+    }
+
+    static func symmetricDecrypt(_ data: Data, key: String, transformation: String, iv: String) -> String {
+        guard let plain = crypt(encrypt: false, data: data, key: key, transformation: transformation, iv: iv) else {
             return ""
         }
         return String(decoding: plain, as: UTF8.self)
     }
 
     static func symmetricEncryptBase64(_ text: String, key: String, transformation: String, iv: String) -> String {
-        guard let cipher = crypt(operation: kCCEncrypt, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
+        guard let cipher = crypt(encrypt: true, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
             return ""
         }
         return cipher.base64EncodedString()
     }
 
     static func symmetricEncrypt(_ text: String, key: String, transformation: String, iv: String) -> String {
-        guard let cipher = crypt(operation: kCCEncrypt, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
+        guard let cipher = crypt(encrypt: true, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
             return ""
         }
         return cipher.map { String(format: "%02x", $0) }.joined()
@@ -845,7 +865,7 @@ enum CryptoSupport {
 
     // MARK: CommonCrypto 兜底（Linux 上为空实现）
 
-    #if canImport(CommonCrypto)
+    #if os(iOS)
     private static func commonCryptDigest(_ data: Data, algorithm: String) -> Data? {
         var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         let nsData = data as NSData
@@ -897,7 +917,7 @@ enum CryptoSupport {
     }
 
     private static func crypt(
-        operation: Int,
+        encrypt: Bool,
         data: Data,
         key: String,
         transformation: String,
@@ -939,7 +959,7 @@ enum CryptoSupport {
             keyData.withUnsafeBytes { keyBytes in
                 ivData.withUnsafeBytes { ivBytes in
                     CCCrypt(
-                        CCOperation(operation),
+                        CCOperation(encrypt ? kCCEncrypt : kCCDecrypt),
                         algorithm,
                         options,
                         keyBytes.baseAddress,
@@ -971,7 +991,7 @@ enum CryptoSupport {
     #else
     private static func commonCryptDigest(_ data: Data, algorithm: String) -> Data? { nil }
     private static func commonCryptHMAC(_ data: Data, algorithm: String, key: Data) -> Data? { nil }
-    private static func crypt(operation: Int, data: Data, key: String, transformation: String, iv: String) -> Data? { nil }
+    private static func crypt(encrypt: Bool, data: Data, key: String, transformation: String, iv: String) -> Data? { nil }
     #endif
 }
 

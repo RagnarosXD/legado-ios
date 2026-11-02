@@ -72,10 +72,34 @@ struct ReaderView: View {
 
                         Spacer(minLength: 4)
 
+                        Menu {
+                            Button {
+                                showingBookmarks = true
+                            } label: {
+                                Label("书签", systemImage: "bookmark")
+                            }
+
+                            Button {
+                                showingChangeSource = true
+                            } label: {
+                                Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                            }
+
+                            Button {
+                                Task { await viewModel.cacheAllChapters() }
+                            } label: {
+                                Label("缓存全书", systemImage: "arrow.down.circle")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.subheadline)
+                                .frame(width: 30, height: 30)
+                        }
+
                         Button(action: { showingChapterList = true }) {
                             Image(systemName: "list.bullet")
                                 .font(.subheadline)
-                                .frame(width: 36, height: 30)
+                                .frame(width: 32, height: 30)
                         }
                     }
                     .padding(.horizontal, 6)
@@ -136,12 +160,12 @@ struct ReaderView: View {
                         .padding(.top, 2)
                         .padding(.bottom, 0)
 
-                        // 工具栏
+                        // 工具栏（顺序对齐 Android ReadMenu：目录 · 朗读 · 界面 · 设置…）
                         HStack(spacing: 0) {
-                            ToolBarButton(icon: "a.square", title: "设置") { showingSettings = true }
+                            ToolBarButton(icon: "list.bullet", title: "目录") { showingChapterList = true }
                             ToolBarButton(icon: "speaker.wave.2", title: "朗读") { showingTTSControls = true }
+                            ToolBarButton(icon: "a.square", title: "界面") { showingSettings = true }
                             ToolBarButton(icon: "timer", title: "自动") { showingAutoPageTurn = true }
-                            ToolBarButton(icon: "bookmark", title: "书签") { showingBookmarks = true }
                             ToolBarButton(icon: "arrow.triangle.2.circlepath", title: "换源") { showingChangeSource = true }
                             ToolBarButton(icon: "arrow.down.circle", title: "缓存") {
                                 Task { await viewModel.cacheAllChapters() }

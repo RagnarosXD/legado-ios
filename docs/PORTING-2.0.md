@@ -123,3 +123,21 @@
 - `java.singleFlight / lock / tick`（书源级并发控制）
 - `java.getReadBookConfig / getThemeConfig`（阅读界面配置）
 - `BaseSource` 的登录态方法（`getLoginInfo / login / getHeaderMap`）
+## 八、批 1：规则分段与组合符（已对齐）
+
+| # | Android 行为 | 位置 | iOS 实现 |
+| --- | --- | --- | --- |
+| 1 | 规则按 `<js>...</js>` / `@js:...` 切成 N 段，前段结果作为后段输入 | `AnalyzeRule.kt:593-636`、`341-364` | `RuleSplitter.splitByJSSegments` + `RuleEngine.executeJSSegments`（普通段重新 parse 上一段结果，JS 段注入 `result` 后执行） |
+| 2 | 组合符种类由「最先出现」的分隔符决定 | `RuleAnalyzer.kt:165-179` | `RuleSplitter.splitCombination` + `firstTopLevelSeparator` |
+| 3 | `[...]`、`(...)`、引号内的分隔符不参与切分 | `RuleAnalyzer.kt:163`、`185-217` | `splitTopLevel` 的深度/引号状态机 |
+| 4 | `%%` 按下标交叉合并 | `AnalyzeByJSoup.kt:106-113` | `RuleEngine.executeCross` |
+| 5 | `&&` 结果按 `\n` 连接 | `AnalyzeByJSoup.kt:44-56` | `executeAnd` 改为 `joined(separator: "\n")` |
+| 6 | `$\d` 取当前结果列表下标 | `AnalyzeRule.kt:783-792` | `TemplateEngine.replaceDollarIndexes` |
+
+验证：`Type Check` ✅（提交 `1c23edb`）。
+
+### 批 1 未覆盖（归入批 2/3）
+
+- `isUrl` 语义与 `getStringList` 的拆分规则（批 3）
+- `@html` 集合整体输出、属性空值不回退（批 3）
+- URL 层的 `analyzeJs`、11 项 URL 选项、`{{}}` 绑定补全（批 2）

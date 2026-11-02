@@ -141,3 +141,22 @@
 - `isUrl` 语义与 `getStringList` 的拆分规则（批 3）
 - `@html` 集合整体输出、属性空值不回退（批 3）
 - URL 层的 `analyzeJs`、11 项 URL 选项、`{{}}` 绑定补全（批 2）
+## 九、批 2：URL 层（已对齐）
+
+| # | Android 行为 | 位置 | iOS 实现 |
+| --- | --- | --- | --- |
+| 1 | `analyzeJs`：整条 URL 的 `<js>`/`@js:` 段执行，普通段 `@result` 承接当前值 | `AnalyzeUrl.kt:188-211` | `AnalyzeUrl.analyzeJS` + `evaluateJS`（`ElementContext.initialResult` 注入 `result`） |
+| 2 | 处理顺序：analyzeJs → replaceKeyPageJs → analyzeUrl | `AnalyzeUrl.kt:175-183` | `analyze` 开头先 `analyzeJS`，再 `expandPageRule` |
+| 3 | URL 选项全集 | `AnalyzeUrl.kt:267-299` | `AnalyzedUrl` 补 `retry/timeout/type/dnsIp/followRedirects/webJs/serverID/webViewDelayTime/origin`；`js` 改写最终 URL、`bodyJs` 改写请求体 |
+| 4 | `javascript:` 地址返回空 | `NetworkUtils.kt:180` | `analyze` 中置空 |
+| 5 | POST 表单逐字段编码（空格→`+`） | `AnalyzeUrl.kt:325-331`、`382-388` | `encodeFormBody` + `percentEncodeForm` |
+| 6 | `retry` / `timeout` | `AnalyzeUrl.kt:282-289`、`OkHttpUtils.kt:29-45` | `getResponseBody` 按配置设置 `timeoutInterval` 并循环重试 |
+| 7 | `{{}}` 是 JS 表达式，可访问 `java`/`cookie`/`source`/`result` | `AnalyzeUrl.kt:395-424` | `evaluateExpression` 改用 `context.jsContext`（已注入 java/source/cookie），补 `result` 绑定，放宽到「含 `.` 或 `(`」也求值 |
+
+验证：`Type Check` ✅（提交 `43b86cb`）。
+
+### 批 2 仍受平台限制（已记录）
+
+- `followRedirects=false`：URLSession 需自定义 delegate 才能禁止跳转，当前仅记录字段
+- `dnsIp` / `serverID` / `webViewDelayTime` / `webJs`：属于 WebView / 私有 DNS 能力，字段已保存但未生效
+- `type`（直接读字节）：未实现

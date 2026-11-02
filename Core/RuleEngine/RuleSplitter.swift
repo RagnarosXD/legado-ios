@@ -4,7 +4,7 @@ import CoreFoundation
 struct SplitRule {
     let type: RuleKind
     let rule: String
-    let replace: (pattern: String, replacement: String, group: Int?)?
+    let replace: (pattern: String, replacement: String, group: Int?, replaceFirst: Bool)?
 }
 
 enum RuleOperator {
@@ -108,9 +108,17 @@ class RuleSplitter {
 
     private static func parseReplace(_ rule: String) -> (
         rule: String,
-        replace: (pattern: String, replacement: String, group: Int?)?
+        replace: (pattern: String, replacement: String, group: Int?, replaceFirst: Bool)?
     ) {
-        let parts = rule.components(separatedBy: "##")
+        // Android AnalyzeRule.kt:549：###pattern##replacement 表示「只替换第一个匹配」
+        var working = rule
+        var replaceFirst = false
+        if let range = working.range(of: "###") {
+            replaceFirst = true
+            working = working.replacingCharacters(in: range, with: "##")
+        }
+
+        let parts = working.components(separatedBy: "##")
         guard parts.count >= 3 else {
             return (rule, nil)
         }
@@ -122,19 +130,19 @@ class RuleSplitter {
         if payload.count == 1 {
             let token = payload[0]
             if let group = Int(token) {
-                return (targetRule, (pattern: pattern, replacement: "$\(group)", group: group))
+                return (targetRule, (pattern: pattern, replacement: "$\(group)", group: group, replaceFirst: replaceFirst))
             }
-            return (targetRule, (pattern: pattern, replacement: token, group: nil))
+            return (targetRule, (pattern: pattern, replacement: token, group: nil, replaceFirst: replaceFirst))
         }
 
         if let last = payload.last, let group = Int(last) {
             let replacementParts = payload.dropLast()
             let replacement = replacementParts.joined(separator: "##")
             let resolvedReplacement = replacement.isEmpty ? "$\(group)" : replacement
-            return (targetRule, (pattern: pattern, replacement: resolvedReplacement, group: group))
+            return (targetRule, (pattern: pattern, replacement: resolvedReplacement, group: group, replaceFirst: replaceFirst))
         }
 
-        return (targetRule, (pattern: pattern, replacement: payload.joined(separator: "##"), group: nil))
+        return (targetRule, (pattern: pattern, replacement: payload.joined(separator: "##"), group: nil, replaceFirst: replaceFirst))
     }
 
     private static func splitIfContains(_ input: String, token: String) -> [String]? {

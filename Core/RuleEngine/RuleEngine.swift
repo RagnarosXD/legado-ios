@@ -18,6 +18,8 @@ class ElementContext {
     var source: BookSource?
     /// 书源变量：同一本书的多条规则之间共享（@put / @get / java.put）
     var variables: [String: String] = [:]
+    /// XPath 命中的原始节点（保留节点身份，避免 toHTML 二次解析丢结构）
+    var xpathNode: Kanna.XMLElement?
 
     init(element: Any, baseUrl: String? = nil, source: BookSource? = nil) {
         self.element = element
@@ -302,7 +304,7 @@ class RuleEngine {
     }
 
     private func applyReplace(
-        _ replace: (pattern: String, replacement: String, group: Int?)?,
+        _ replace: (pattern: String, replacement: String, group: Int?, replaceFirst: Bool)?,
         to result: RuleResult
     ) throws -> RuleResult {
         guard let replace else { return result }
@@ -315,10 +317,16 @@ class RuleEngine {
 
         switch result {
         case .string(let value):
+            if replace.replaceFirst {
+                return .string(Self.replaceFirstMatch(in: value, regex: regex, template: replacement))
+            }
             let range = NSRange(value.startIndex..., in: value)
             let replaced = regex.stringByReplacingMatches(in: value, range: range, withTemplate: replacement)
             return .string(replaced)
         case .list(let values):
+            if replace.replaceFirst {
+                return .list(values.map { Self.replaceFirstMatch(in: $0, regex: regex, template: replacement) })
+            }
             let replacedValues = values.map { item in
                 let range = NSRange(item.startIndex..., in: item)
                 return regex.stringByReplacingMatches(in: item, range: range, withTemplate: replacement)
@@ -327,6 +335,19 @@ class RuleEngine {
         case .none:
             return .none
         }
+    }
+
+    /// 对齐 Android：只取第一个匹配的整段做替换，返回替换后的那一段；没有匹配返回空串
+    private static func replaceFirstMatch(in value: String, regex: NSRegularExpression, template: String) -> String {
+        let range = NSRange(value.startIndex..., in: value)
+        guard let match = regex.firstMatch(in: value, range: range),
+              let matchRange = Range(match.range, in: value) else {
+            return ""
+        }
+
+        let segment = String(value[matchRange])
+        let segmentRange = NSRange(segment.startIndex..., in: segment)
+        return regex.stringByReplacingMatches(in: segment, range: segmentRange, withTemplate: template)
     }
 
     private func flatten(_ result: RuleResult) -> [String] {
@@ -405,8 +426,12 @@ class RuleEngine {
 
             var elements: [ElementContext] = []
             for node in doc.xpath(xpath) {
-                guard let html = node.toHTML, !html.isEmpty else { continue }
-                elements.append(ElementContext(element: html, baseUrl: baseUrl))
+                let html = node.toHTML ?? ""
+                // 属性节点 / 文本节点的 toHTML 为空，但 Android 会把它们的值作为结果
+                guard !html.isEmpty || node.text != nil else { continue }
+                let ctx = ElementContext(element: html, baseUrl: baseUrl)
+                ctx.xpathNode = node
+                elements.append(ctx)
             }
             return elements
         } catch {
@@ -439,14 +464,11 @@ class RuleEngine {
         var elements: [ElementContext]
 
         if rule.lowercased().hasPrefix("@xpath:") || rule.hasPrefix("//") {
+            // 统一走 getXPathElements：保留节点身份（属性/文本节点也能取到值）
             let xpath = rule.lowercased().hasPrefix("@xpath:")
                 ? String(rule.dropFirst(7)).trimmingCharacters(in: .whitespaces)
                 : rule
-            let kannaDoc = try Kanna.HTML(html: body, encoding: .utf8)
-            elements = kannaDoc.xpath(xpath).compactMap { node -> ElementContext? in
-                guard let html = node.toHTML else { return nil }
-                return ElementContext(element: html, baseUrl: baseUrl)
-            }
+            elements = try getXPathElements(xpath: xpath, body: body, baseUrl: baseUrl)
         } else {
             // class./id./tag./text./children 语法 + @tag. 级联 + !index
             let parsed = LegadoSelector.parse(rule)
@@ -534,6 +556,19 @@ class RuleEngine {
         context.baseURL = (baseUrl ?? elementContext.baseUrl).flatMap { URL(string: $0) }
         context.source = elementContext.source
         context.variables = elementContext.variables
+
+        // XPath 命中的节点：字段规则只做取值时直接从节点读（对齐 Android 节点身份语义）
+        if let node = elementContext.xpathNode {
+            let parsed = LegadoSelector.parse(ruleStr)
+            let isPureValueRule = parsed.selector.isEmpty && parsed.cascades.isEmpty && parsed.indexMode == .none
+            if isPureValueRule {
+                var value = XPathParser.value(from: node, attr: parsed.attr)
+                if parsed.attr.lowercased() == "href" || parsed.attr.lowercased() == "src" {
+                    value = CSSParser.absolute(value, base: (baseUrl ?? elementContext.baseUrl).flatMap { URL(string: $0) })
+                }
+                return value
+            }
+        }
 
         switch elementContext.element {
         case let dictionary as [String: Any]:
@@ -938,6 +973,18 @@ class CSSParser: RuleExecutor {
 // MARK: - XPath 解析器 (Kanna)
 class XPathParser: RuleExecutor {
     var kind: RuleKind { .xpath }
+
+    /// 从保留的 Kanna 节点直接取值（text / html / 属性）
+    static func value(from node: Kanna.XMLElement, attr: String) -> String {
+        switch attr.lowercased() {
+        case "text", "owntext", "":
+            return node.text ?? ""
+        case "html", "innerhtml", "outerhtml", "all":
+            return node.toHTML ?? ""
+        default:
+            return attribute(attr, html: node.toHTML)
+        }
+    }
     
     func canExecute(_ rule: String) -> Bool {
         return rule.hasPrefix("//")

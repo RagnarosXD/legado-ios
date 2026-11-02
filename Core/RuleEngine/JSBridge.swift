@@ -2,6 +2,10 @@ import Foundation
 import JavaScriptCore
 import CryptoKit
 
+#if canImport(CommonCrypto)
+import CommonCrypto
+#endif
+
 class JSBridge {
     weak var context: ExecutionContext?
     weak var ruleEngine: RuleEngine?
@@ -68,7 +72,7 @@ class JSBridge {
             return json
         }
 
-        // java.getString(rule) / java.getElements(rule)：在“当前页面上下文”上求值
+        // java.getString(rule) / java.getElements(rule)：在"当前页面上下文"上求值
         let ruleStringBlock: @convention(block) (String) -> String = { rule in
             guard let context = self.context, !rule.isEmpty else { return "" }
             let engine = RuleEngine()
@@ -167,6 +171,9 @@ class JSBridge {
         javaObject?.setObject(timeFormatBlock, forKeyedSubscript: "__timeFormat" as NSString)
 
         jsContext.setObject(javaObject, forKeyedSubscript: "java" as NSString)
+
+        // 扩展 API 必须在 java 全局对象建立之后注入（内部还有一层 JS 包装）
+        injectExtendedAPIs(into: javaObject)
 
         _ = jsContext.evaluateScript(
             """
@@ -481,5 +488,521 @@ class JSBridgeHTTPClient {
         }
 
         return String(data: data, encoding: .isoLatin1)
+    }
+}
+
+extension JSBridge {
+
+    /// 对齐 Android JsExtensions / JsEncodeUtils 的其余高频 API（1.3.10）
+    /// 新增：setLocal、hex、bytes、digest、HMAC、AES/DES/3DES、timeFormatUTC、
+    ///      toNumChapter、randomUUID、logType、cookie、文本文件读写
+    func injectExtendedAPIs(into javaObject: JSValue?) {
+        guard let javaObject else { return }
+        let context = self.context
+
+        // setLocal：仅本次规则链内可见（Android AnalyzeRule.setLocal）
+        let setLocalBlock: @convention(block) (String, String) -> String = { key, value in
+            context?.variables[key] = value
+            return value
+        }
+        javaObject.setObject(setLocalBlock, forKeyedSubscript: "setLocal" as NSString)
+
+        // hex / 字节
+        let hexEncodeBlock: @convention(block) (String) -> String = { text in
+            CryptoSupport.hexEncode(text)
+        }
+        javaObject.setObject(hexEncodeBlock, forKeyedSubscript: "hexEncodeToString" as NSString)
+
+        let hexDecodeBlock: @convention(block) (String) -> String = { hex in
+            CryptoSupport.hexDecodeToString(hex)
+        }
+        javaObject.setObject(hexDecodeBlock, forKeyedSubscript: "hexDecodeToString" as NSString)
+
+        let strToBytesBlock: @convention(block) (String) -> [Int] = { text in
+            Array(text.utf8).map { Int($0) }
+        }
+        javaObject.setObject(strToBytesBlock, forKeyedSubscript: "strToBytes" as NSString)
+
+        let bytesToStrBlock: @convention(block) (NSArray) -> String = { array in
+            let bytes = array.compactMap { ($0 as? NSNumber)?.uint8Value }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+        javaObject.setObject(bytesToStrBlock, forKeyedSubscript: "bytesToStr" as NSString)
+
+        // 摘要
+        let digestHexBlock: @convention(block) (String, String) -> String = { text, algorithm in
+            CryptoSupport.digestHex(text, algorithm: algorithm)
+        }
+        javaObject.setObject(digestHexBlock, forKeyedSubscript: "digestHex" as NSString)
+
+        let digestBase64Block: @convention(block) (String, String) -> String = { text, algorithm in
+            CryptoSupport.digestBase64(text, algorithm: algorithm)
+        }
+        javaObject.setObject(digestBase64Block, forKeyedSubscript: "digestBase64Str" as NSString)
+
+        let hmacHexBlock: @convention(block) (String, String, String) -> String = { text, algorithm, key in
+            CryptoSupport.hmacHex(text, algorithm: algorithm, key: key)
+        }
+        javaObject.setObject(hmacHexBlock, forKeyedSubscript: "HMacHex" as NSString)
+
+        let hmacBase64Block: @convention(block) (String, String, String) -> String = { text, algorithm, key in
+            CryptoSupport.hmacBase64(text, algorithm: algorithm, key: key)
+        }
+        javaObject.setObject(hmacBase64Block, forKeyedSubscript: "HMacBase64" as NSString)
+
+        // 对称加解密（AES / DES / 3DES，ECB/CBC + PKCS7）
+        let aesDecodeBlock: @convention(block) (String, String, String, String) -> String = { data, key, transformation, iv in
+            CryptoSupport.symmetricDecryptBase64(data, key: key, transformation: transformation, iv: iv)
+        }
+        javaObject.setObject(aesDecodeBlock, forKeyedSubscript: "aesBase64DecodeToString" as NSString)
+
+        let aesDecodeRawBlock: @convention(block) (String, String, String, String) -> String = { data, key, transformation, iv in
+            CryptoSupport.symmetricDecrypt(data, key: key, transformation: transformation, iv: iv)
+        }
+        javaObject.setObject(aesDecodeRawBlock, forKeyedSubscript: "aesDecodeToString" as NSString)
+
+        let aesEncodeBlock: @convention(block) (String, String, String, String) -> String = { text, key, transformation, iv in
+            CryptoSupport.symmetricEncryptBase64(text, key: key, transformation: transformation, iv: iv)
+        }
+        javaObject.setObject(aesEncodeBlock, forKeyedSubscript: "aesEncodeToBase64String" as NSString)
+
+        let aesEncodeRawBlock: @convention(block) (String, String, String, String) -> String = { text, key, transformation, iv in
+            CryptoSupport.symmetricEncrypt(text, key: key, transformation: transformation, iv: iv)
+        }
+        javaObject.setObject(aesEncodeRawBlock, forKeyedSubscript: "aesEncodeToString" as NSString)
+
+        javaObject.setObject(aesDecodeBlock, forKeyedSubscript: "desBase64DecodeToString" as NSString)
+        javaObject.setObject(aesDecodeRawBlock, forKeyedSubscript: "desDecodeToString" as NSString)
+        javaObject.setObject(aesEncodeBlock, forKeyedSubscript: "desEncodeToBase64String" as NSString)
+        javaObject.setObject(aesEncodeRawBlock, forKeyedSubscript: "desEncodeToString" as NSString)
+        javaObject.setObject(aesDecodeBlock, forKeyedSubscript: "tripleDESDecodeArgsBase64Str" as NSString)
+        javaObject.setObject(aesEncodeBlock, forKeyedSubscript: "tripleDESEncodeArgsBase64Str" as NSString)
+
+        // 时间（带时区）
+        let timeFormatUTCBlock: @convention(block) (Double, String, Double) -> String = { time, format, offset in
+            CryptoSupport.formatTimeUTC(milliseconds: time, format: format, hourOffset: offset)
+        }
+        javaObject.setObject(timeFormatUTCBlock, forKeyedSubscript: "timeFormatUTC" as NSString)
+
+        // 章节号中文数字 → 阿拉伯数字
+        let toNumChapterBlock: @convention(block) (String) -> String = { text in
+            CryptoSupport.normalizeChapterNumber(text)
+        }
+        javaObject.setObject(toNumChapterBlock, forKeyedSubscript: "toNumChapter" as NSString)
+
+        // UUID / logType
+        let uuidBlock: @convention(block) () -> String = {
+            UUID().uuidString
+        }
+        javaObject.setObject(uuidBlock, forKeyedSubscript: "randomUUID" as NSString)
+
+        let logTypeBlock: @convention(block) (Any?) -> Void = { value in
+            AppLogger.debug("JS", "logType: \(String(describing: value))")
+        }
+        javaObject.setObject(logTypeBlock, forKeyedSubscript: "logType" as NSString)
+
+        // cookie
+        let cookieBlock: @convention(block) (String) -> String = { url in
+            CookieStore.shared.cookieString(for: url) ?? ""
+        }
+        javaObject.setObject(cookieBlock, forKeyedSubscript: "getCookie" as NSString)
+
+        // 文本文件（限定在 Documents 下，防目录穿越）
+        let readFileBlock: @convention(block) (String) -> String = { path in
+            FileSandbox.readText(relativePath: path) ?? ""
+        }
+        javaObject.setObject(readFileBlock, forKeyedSubscript: "readTxtFile" as NSString)
+        javaObject.setObject(readFileBlock, forKeyedSubscript: "readFile" as NSString)
+
+        let writeFileBlock: @convention(block) (String, String) -> Bool = { path, content in
+            FileSandbox.writeText(relativePath: path, content: content)
+        }
+        javaObject.setObject(writeFileBlock, forKeyedSubscript: "writeTxtFile" as NSString)
+
+        let deleteFileBlock: @convention(block) (String) -> Bool = { path in
+            FileSandbox.delete(relativePath: path)
+        }
+        javaObject.setObject(deleteFileBlock, forKeyedSubscript: "deleteFile" as NSString)
+
+        // JS 包装：getStringList / getElement 复用 __getElements
+        _ = context?.jsContext?.evaluateScript(
+            """
+            (function () {
+                if (typeof java === 'undefined' || !java) { return; }
+                function s(value) { return value === null || value === undefined ? '' : String(value); }
+                java.getStringList = function (rule) {
+                    var raw = java.__getElements(s(rule));
+                    try { return JSON.parse(raw); } catch (e) { return []; }
+                };
+                java.getElement = function (rule) {
+                    var raw = java.__getElements(s(rule));
+                    try { var list = JSON.parse(raw); return list.length ? list[0] : null; } catch (e) { return null; }
+                };
+                java.log = (function (original) {
+                    return function (msg) { if (original) { original(s(msg)); } return msg; };
+                })(java.log);
+            })();
+            """
+        )
+    }
+}
+
+// MARK: - 加密 / 编码工具（对齐 JsEncodeUtils）
+
+enum CryptoSupport {
+
+    // MARK: Hex
+
+    static func hexEncode(_ text: String) -> String {
+        text.utf8.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func hexDecodeToString(_ hex: String) -> String {
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.count % 2 == 0 else { return "" }
+
+        var bytes: [UInt8] = []
+        var index = cleaned.startIndex
+        while index < cleaned.endIndex {
+            let next = cleaned.index(index, offsetBy: 2)
+            guard let byte = UInt8(cleaned[index..<next], radix: 16) else { return "" }
+            bytes.append(byte)
+            index = next
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    // MARK: 摘要
+
+    static func digestHex(_ text: String, algorithm: String) -> String {
+        digest(text, algorithm: algorithm).map { $0.map { String(format: "%02x", $0) }.joined() } ?? ""
+    }
+
+    static func digestBase64(_ text: String, algorithm: String) -> String {
+        digest(text, algorithm: algorithm)?.base64EncodedString() ?? ""
+    }
+
+    static func digest(_ text: String, algorithm: String) -> Data? {
+        let data = Data(text.utf8)
+        let name = algorithm.uppercased()
+
+        #if canImport(CryptoKit)
+        switch name {
+        case "SHA-1", "SHA1":
+            return Data(Insecure.SHA1.hash(data: data))
+        case "SHA-256", "SHA256":
+            return Data(SHA256.hash(data: data))
+        case "SHA-384", "SHA384":
+            return Data(SHA384.hash(data: data))
+        case "SHA-512", "SHA512":
+            return Data(SHA512.hash(data: data))
+        default:
+            break
+        }
+        #endif
+
+        return commonCryptDigest(data, algorithm: name)
+    }
+
+    // MARK: HMAC
+
+    static func hmacHex(_ text: String, algorithm: String, key: String) -> String {
+        hmac(text, algorithm: algorithm, key: key).map { $0.map { String(format: "%02x", $0) }.joined() } ?? ""
+    }
+
+    static func hmacBase64(_ text: String, algorithm: String, key: String) -> String {
+        hmac(text, algorithm: algorithm, key: key)?.base64EncodedString() ?? ""
+    }
+
+    static func hmac(_ text: String, algorithm: String, key: String) -> Data? {
+        let data = Data(text.utf8)
+        let keyData = Data(key.utf8)
+
+        #if canImport(CryptoKit)
+        let name = algorithm.uppercased()
+        switch name {
+        case "HmacSHA1", "SHA-1", "SHA1", "HmacSHA-1":
+            return Data(HMAC<Insecure.SHA1>.authenticationCode(for: data, using: SymmetricKey(data: keyData)))
+        case "HmacSHA256", "SHA-256", "SHA256", "HmacSHA-256":
+            return Data(HMAC<SHA256>.authenticationCode(for: data, using: SymmetricKey(data: keyData)))
+        case "HmacSHA384", "SHA-384", "SHA384":
+            return Data(HMAC<SHA384>.authenticationCode(for: data, using: SymmetricKey(data: keyData)))
+        case "HmacSHA512", "SHA-512", "SHA512":
+            return Data(HMAC<SHA512>.authenticationCode(for: data, using: SymmetricKey(data: keyData)))
+        default:
+            break
+        }
+        #endif
+
+        return commonCryptHMAC(data, algorithm: algorithm, key: keyData)
+    }
+
+    // MARK: 对称加解密
+
+    static func symmetricDecryptBase64(_ data: String, key: String, transformation: String, iv: String) -> String {
+        guard let cipher = Data(base64Encoded: data.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return ""
+        }
+        return symmetricDecrypt(cipher, key: key, transformation: transformation, iv: iv)
+    }
+
+    static func symmetricDecrypt(_ data: String, key: String, transformation: String, iv: String) -> String {
+        let cipher = hexToData(data) ?? Data(base64Encoded: data) ?? Data()
+        guard let plain = crypt(operation: kCCDecrypt, data: cipher, key: key, transformation: transformation, iv: iv) else {
+            return ""
+        }
+        return String(decoding: plain, as: UTF8.self)
+    }
+
+    static func symmetricEncryptBase64(_ text: String, key: String, transformation: String, iv: String) -> String {
+        guard let cipher = crypt(operation: kCCEncrypt, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
+            return ""
+        }
+        return cipher.base64EncodedString()
+    }
+
+    static func symmetricEncrypt(_ text: String, key: String, transformation: String, iv: String) -> String {
+        guard let cipher = crypt(operation: kCCEncrypt, data: Data(text.utf8), key: key, transformation: transformation, iv: iv) else {
+            return ""
+        }
+        return cipher.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func hexToData(_ hex: String) -> Data? {
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, cleaned.count % 2 == 0,
+              cleaned.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil else {
+            return nil
+        }
+        var data = Data()
+        var index = cleaned.startIndex
+        while index < cleaned.endIndex {
+            let next = cleaned.index(index, offsetBy: 2)
+            guard let byte = UInt8(cleaned[index..<next], radix: 16) else { return nil }
+            data.append(byte)
+            index = next
+        }
+        return data
+    }
+
+    // MARK: 时间与文本
+
+    static func formatTimeUTC(milliseconds: Double, format: String, hourOffset: Double) -> String {
+        let date = Date(timeIntervalSince1970: milliseconds / 1000)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format.isEmpty ? "yyyy/MM/dd HH:mm" : format
+        formatter.timeZone = TimeZone(secondsFromGMT: Int(hourOffset * 3600))
+        return formatter.string(from: date)
+    }
+
+    /// 章节号归一化：中文数字/全角数字 → 阿拉伯数字（对齐 Android toNumChapter）
+    static func normalizeChapterNumber(_ text: String) -> String {
+        var result = text
+        let digits: [Character: Int] = [
+            "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+            "六": 6, "七": 7, "八": 8, "九": 9
+        ]
+        let units: [Character: Int] = ["十": 10, "百": 100, "千": 1000, "万": 10000]
+
+        // 全角数字
+        for (full, ascii) in zip("０１２３４５６７８９", "0123456789") {
+            result = result.replacingOccurrences(of: String(full), with: String(ascii))
+        }
+
+        // 简单中文数字（<= 9999）
+        var total = 0
+        var section = 0
+        var number = 0
+        var converted = false
+
+        for char in result {
+            if let value = digits[char] {
+                number = value
+                converted = true
+            } else if let unit = units[char] {
+                section += (number == 0 ? 1 : number) * unit
+                number = 0
+                converted = true
+            } else if char.isNumber {
+                number = number * 10 + (Int(String(char)) ?? 0)
+            }
+        }
+
+        guard converted else { return result }
+
+        total = section + number
+        if total <= 0 { return result }
+
+        // 只替换连续的「中文数字 + 单位」片段，保留其余文字
+        let pattern = "[零一二两三四五六七八九十百千万]+"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "\(total)")
+        }
+        return result
+    }
+
+    // MARK: CommonCrypto 兜底（Linux 上为空实现）
+
+    #if canImport(CommonCrypto)
+    private static func commonCryptDigest(_ data: Data, algorithm: String) -> Data? {
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        let nsData = data as NSData
+
+        switch algorithm {
+        case "MD5":
+            CC_MD5(nsData.bytes, CC_LONG(nsData.length), &digest)
+            return Data(digest.prefix(Int(CC_MD5_DIGEST_LENGTH)))
+        case "SHA-1", "SHA1":
+            CC_SHA1(nsData.bytes, CC_LONG(nsData.length), &digest)
+            return Data(digest.prefix(Int(CC_SHA1_DIGEST_LENGTH)))
+        default:
+            return nil
+        }
+    }
+
+    private static func commonCryptHMAC(_ data: Data, algorithm: String, key: Data) -> Data? {
+        let algorithmName = algorithm.uppercased()
+        let ccAlgorithm: CCHmacAlgorithm
+
+        switch algorithmName {
+        case "HMACSHA1", "SHA-1", "SHA1", "HMACSHA-1":
+            ccAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA1)
+        case "HMACSHA256", "SHA-256", "SHA256", "HMACSHA-256":
+            ccAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA256)
+        case "HMACSHA512", "SHA-512", "SHA512":
+            ccAlgorithm = CCHmacAlgorithm(kCCHmacAlgSHA512)
+        default:
+            return nil
+        }
+
+        let digestLength = ccAlgorithm == CCHmacAlgorithm(kCCHmacAlgSHA1) ? Int(CC_SHA1_DIGEST_LENGTH)
+            : (ccAlgorithm == CCHmacAlgorithm(kCCHmacAlgSHA256) ? Int(CC_SHA256_DIGEST_LENGTH) : Int(CC_SHA512_DIGEST_LENGTH))
+
+        var result = [UInt8](repeating: 0, count: digestLength)
+        data.withUnsafeBytes { dataBytes in
+            key.withUnsafeBytes { keyBytes in
+                CCHmac(
+                    ccAlgorithm,
+                    keyBytes.baseAddress,
+                    key.count,
+                    dataBytes.baseAddress,
+                    data.count,
+                    &result
+                )
+            }
+        }
+        return Data(result)
+    }
+
+    private static func crypt(
+        operation: Int,
+        data: Data,
+        key: String,
+        transformation: String,
+        iv: String
+    ) -> Data? {
+        let upper = transformation.uppercased()
+        let algorithm: CCAlgorithm
+        if upper.contains("DESEDE") || upper.contains("3DES") {
+            algorithm = CCAlgorithm(kCCAlgorithm3DES)
+        } else if upper.contains("DES") {
+            algorithm = CCAlgorithm(kCCAlgorithmDES)
+        } else {
+            algorithm = CCAlgorithm(kCCAlgorithmAES)
+        }
+
+        let options = CCOptions(kCCOptionPKCS7Padding)
+            | (upper.contains("ECB") ? CCOptions(kCCOptionECBMode) : 0)
+
+        var keyData = Data(key.utf8)
+        var ivData = Data(iv.utf8)
+
+        switch algorithm {
+        case CCAlgorithm(kCCAlgorithmAES):
+            if keyData.count < kCCKeySizeAES128 { keyData = padded(keyData, to: kCCKeySizeAES128) }
+            ivData = padded(ivData, to: kCCBlockSizeAES128, zeroIfEmpty: true)
+        case CCAlgorithm(kCCAlgorithmDES):
+            keyData = padded(keyData, to: kCCKeySizeDES)
+            ivData = padded(ivData, to: kCCBlockSizeDES, zeroIfEmpty: true)
+        default:
+            keyData = padded(keyData, to: kCCKeySize3DES)
+            ivData = padded(ivData, to: kCCBlockSize3DES, zeroIfEmpty: true)
+        }
+
+        let outLength = data.count + kCCBlockSizeAES128
+        var output = [UInt8](repeating: 0, count: outLength)
+        var actualLength = 0
+
+        let status = data.withUnsafeBytes { dataBytes -> CCCryptorStatus in
+            keyData.withUnsafeBytes { keyBytes in
+                ivData.withUnsafeBytes { ivBytes in
+                    CCCrypt(
+                        CCOperation(operation),
+                        algorithm,
+                        options,
+                        keyBytes.baseAddress,
+                        keyData.count,
+                        upper.contains("ECB") ? nil : ivBytes.baseAddress,
+                        dataBytes.baseAddress,
+                        data.count,
+                        &output,
+                        outLength,
+                        &actualLength
+                    )
+                }
+            }
+        }
+
+        guard status == kCCSuccess else { return nil }
+        return Data(output.prefix(actualLength))
+    }
+
+    private static func padded(_ data: Data, to length: Int, zeroIfEmpty: Bool = false) -> Data {
+        if data.isEmpty && zeroIfEmpty {
+            return Data(repeating: 0, count: length)
+        }
+        if data.count >= length {
+            return Data(data.prefix(length))
+        }
+        return data + Data(repeating: 0, count: length - data.count)
+    }
+    #else
+    private static func commonCryptDigest(_ data: Data, algorithm: String) -> Data? { nil }
+    private static func commonCryptHMAC(_ data: Data, algorithm: String, key: Data) -> Data? { nil }
+    private static func crypt(operation: Int, data: Data, key: String, transformation: String, iv: String) -> Data? { nil }
+    #endif
+}
+
+// MARK: - 受限文件访问（对齐 Android getFile/readTxtFile 的相对路径语义）
+
+enum FileSandbox {
+    private static var root: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    private static func resolve(_ relativePath: String) -> URL? {
+        let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("/") else { return nil }
+        let url = root.appendingPathComponent(trimmed).standardizedFileURL
+        guard url.path.hasPrefix(root.standardizedFileURL.path) else { return nil }
+        return url
+    }
+
+    static func readText(relativePath: String) -> String? {
+        guard let url = resolve(relativePath) else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    static func writeText(relativePath: String, content: String) -> Bool {
+        guard let url = resolve(relativePath) else { return false }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return (try? content.write(to: url, atomically: true, encoding: .utf8)) != nil
+    }
+
+    static func delete(relativePath: String) -> Bool {
+        guard let url = resolve(relativePath) else { return false }
+        return (try? FileManager.default.removeItem(at: url)) != nil
     }
 }

@@ -91,3 +91,35 @@
 | `java.webView/startBrowser/downloadFile/cookie/cacheFile/aes/des/digest` | 少数源依赖 | 按失败源逐个补 |
 | `setLocal` 语义 | Android 源码未在本轮核实 | 核实后再实现 |
 | `@regex` 的 replaceFirst 细节 | 少量源 | P1.1 |
+
+## 七、P1 收尾（1.3.10）
+
+### 新增对齐项
+
+| 项 | Android 依据 | 实现 |
+| --- | --- | --- |
+| `##` 全量替换 / `###` 只替换首个 | `AnalyzeRule.kt:541-566` | `parseReplace` 识别 `###`，`applyReplace` 的 `replaceFirstMatch` 取首个匹配整段替换；无匹配返回空串 |
+| XPath 节点身份 | `AnalyzeByXPath.kt:17-50` | `ElementContext.xpathNode` 保留 Kanna 节点；纯取值规则直接读节点，不再 `toHTML` 二次解析；属性/文本节点不再因 `toHTML == nil` 被丢弃 |
+| `@xpath:` 列表统一入口 | 同上 | `getHtmlElements` 的 XPath 分支改为复用 `getXPathElements` |
+| `java.setLocal` | `AnalyzeRule.kt` setLocal | 写入当前规则链 `variables`，不持久化 |
+| `java.hexEncodeToString / hexDecodeToString / strToBytes / bytesToStr` | `JsEncodeUtils` | 新增 |
+| `java.digestHex / digestBase64Str / HMacHex / HMacBase64` | `JsEncodeUtils` | CryptoKit（SHA1/256/384/512）+ CommonCrypto 兜底（MD5/SHA1） |
+| `java.aes* / des* / tripleDES*` | `JsEncodeUtils` | CommonCrypto：AES/DES/3DES，ECB/CBC + PKCS7，hex 或 Base64 输入输出 |
+| `java.timeFormatUTC / toNumChapter / randomUUID / logType / getCookie` | `JsExtensions` | 新增 |
+| `java.readTxtFile / writeTxtFile / deleteFile` | `JsExtensions` 文件能力 | `FileSandbox`（限定 Documents、防目录穿越） |
+| `java.getStringList / getElement` | `AnalyzeRule` | JS 包装复用 `__getElements` |
+| `java.log` 返回入参 | `JsExtensions` | 包装后 `return msg`，支持链式 |
+
+### P1 判定
+
+规则引擎部分（切分、取值、索引、变量、URL、兜底、JS 桥高频 API）已按 Android 语义对齐，`Type Check` 通过。
+
+仍属「未实现但已知」的能力（不阻塞 P2，按失败源补）：
+
+- `java.webView / webViewGetSource / startBrowser / showBrowser`（需要 WKWebView 后台加载）
+- `java.downloadFile / cacheFile / importScript / 解压系列`
+- `java.queryTTF / replaceFont`（字体反混淆）
+- `java.createAsymmetricCrypto / createSign`（RSA/证书）
+- `java.singleFlight / lock / tick`（书源级并发控制）
+- `java.getReadBookConfig / getThemeConfig`（阅读界面配置）
+- `BaseSource` 的登录态方法（`getLoginInfo / login / getHeaderMap`）

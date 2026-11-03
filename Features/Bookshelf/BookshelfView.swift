@@ -192,6 +192,7 @@ ToolbarItem(placement: .navigationBarTrailing) {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
     private var bookshelfContent: some View {
         switch viewModel.viewMode {
         case .grid:

@@ -47,11 +47,40 @@ enum SourceFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// 排序方式（对齐 Android BookSourceSort）
+enum SourceSortBy: String, CaseIterable, Identifiable {
+    case manual
+    case name
+    case url
+    case weight
+    case updateTime
+    case enabled
+    case respondTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manual: return "手动排序"
+        case .name: return "名称"
+        case .url: return "地址"
+        case .weight: return "权重"
+        case .updateTime: return "更新时间"
+        case .enabled: return "启用状态"
+        case .respondTime: return "响应时间"
+        }
+    }
+}
+
 @MainActor
 class SourceViewModel: ObservableObject {
     @Published var sources: [BookSource] = []
     @Published var errorMessage: String?
     @Published var activeFilter: SourceFilter = .all
+    /// 关键词过滤（名称 / 地址 / 分组）
+    @Published var searchText: String = ""
+    /// 排序（默认沿用 Android 的手动顺序）
+    @Published var sortBy: SourceSortBy = .manual
 
     /// 需要登录的书源（声明 + 规则引用的并集），加载后一次算好，避免每次筛选重复解析规则
     @Published private(set) var loginSourceIds: Set<UUID> = []
@@ -81,18 +110,82 @@ class SourceViewModel: ObservableObject {
         }
     }
 
-    /// 当前筛选下的书源
+    /// 当前筛选 + 搜索 + 排序后的书源
     var filteredSources: [BookSource] {
+        var list: [BookSource]
+
         switch activeFilter {
-        case .all: return sources
-        case .text: return sources.filter { $0.bookSourceType == 0 }
-        case .audio: return sources.filter { $0.bookSourceType == 1 }
-        case .image: return sources.filter { $0.bookSourceType == 2 }
-        case .file: return sources.filter { $0.bookSourceType == 3 }
-        case .login: return sources.filter { loginSourceIds.contains($0.sourceId) }
-        case .explore: return sources.filter { $0.hasExplore }
-        case .disabled: return sources.filter { !$0.enabled }
+        case .all: list = sources
+        case .text: list = sources.filter { $0.bookSourceType == 0 }
+        case .audio: list = sources.filter { $0.bookSourceType == 1 }
+        case .image: list = sources.filter { $0.bookSourceType == 2 }
+        case .file: list = sources.filter { $0.bookSourceType == 3 }
+        case .login: list = sources.filter { loginSourceIds.contains($0.sourceId) }
+        case .explore: list = sources.filter { $0.hasExplore }
+        case .disabled: list = sources.filter { !$0.enabled }
         }
+
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !keyword.isEmpty {
+            list = list.filter { source in
+                source.bookSourceName.lowercased().contains(keyword)
+                    || source.bookSourceUrl.lowercased().contains(keyword)
+                    || (source.bookSourceGroup ?? "").lowercased().contains(keyword)
+            }
+        }
+
+        return sorted(list)
+    }
+
+    /// 对齐 Android BookSourceSort：手动 / 名称 / 地址 / 权重 / 更新时间 / 启用 / 响应
+    private func sorted(_ list: [BookSource]) -> [BookSource] {
+        switch sortBy {
+        case .manual:
+            return list.sorted { $0.customOrder < $1.customOrder }
+        case .name:
+            return list.sorted {
+                $0.bookSourceName.localizedStandardCompare($1.bookSourceName) == .orderedAscending
+            }
+        case .url:
+            return list.sorted {
+                $0.bookSourceUrl.localizedStandardCompare($1.bookSourceUrl) == .orderedAscending
+            }
+        case .weight:
+            return list.sorted { $0.weight > $1.weight }
+        case .updateTime:
+            return list.sorted { $0.lastUpdateTime > $1.lastUpdateTime }
+        case .enabled:
+            // 启用的在前，同状态按名称
+            return list.sorted {
+                if $0.enabled != $1.enabled { return $0.enabled }
+                return $0.bookSourceName.localizedStandardCompare($1.bookSourceName) == .orderedAscending
+            }
+        case .respondTime:
+            return list.sorted { $0.respondTime < $1.respondTime }
+        }
+    }
+
+    /// 置顶：把 customOrder 调到最小
+    func moveToTop(_ source: BookSource) {
+        let minOrder = sources.map(\.customOrder).min() ?? 0
+        source.customOrder = minOrder - 1
+        try? CoreDataStack.shared.save()
+        Task { await loadSources() }
+    }
+
+    /// 置底：把 customOrder 调到最大
+    func moveToBottom(_ source: BookSource) {
+        let maxOrder = sources.map(\.customOrder).max() ?? 0
+        source.customOrder = maxOrder + 1
+        try? CoreDataStack.shared.save()
+        Task { await loadSources() }
+    }
+
+    /// 切换发现页开关
+    func toggleExplore(_ source: BookSource) {
+        source.enabledExplore.toggle()
+        try? CoreDataStack.shared.save()
+        Task { await loadSources() }
     }
 
     func count(for filter: SourceFilter) -> Int {
@@ -502,8 +595,10 @@ class SourceViewModel: ObservableObject {
         return changed
     }
 
-    func exportAllSources() -> Data? {
-        let exportSources = sources.map { ExportableSource(from: $0) }
+    /// 导出选中；ids 为空则导出全部（对齐 Android「导出选中」）
+    func exportSources(ids: Set<UUID>? = nil) -> Data? {
+        let picked = ids.map { id in sources.filter { id.contains($0.sourceId) } } ?? sources
+        let exportSources = picked.map { ExportableSource(from: $0) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {

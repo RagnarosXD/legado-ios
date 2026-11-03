@@ -17,6 +17,10 @@ struct BookshelfView: View {
     @State private var showingSearch = false
     /// 长按菜单里选中的待换源书籍
     @State private var changeSourceBook: Book?
+    /// 批量管理（对齐 Android BookshelfManageActivity）
+    @State private var isSelecting = false
+    @State private var selectedBookIds: Set<String> = []
+    @State private var showingGroupPicker = false
     
     var body: some View {
         Group {
@@ -37,6 +41,19 @@ struct BookshelfView: View {
         .onChange(of: viewModel.sortBy) { _ in
             Task { await viewModel.loadBooks() }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isSelecting {
+                batchBar
+            }
+        }
+        .confirmationDialog("加入分组", isPresented: $showingGroupPicker, titleVisibility: .visible) {
+            ForEach(viewModel.groups, id: \.groupId) { group in
+                Button(group.groupName) {
+                    viewModel.addBooks(ids: selectedBookIds, toGroup: group.groupId)
+                }
+            }
+            Button("取消", role: .cancel) { }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Picker("", selection: $viewModel.viewMode) {
@@ -50,6 +67,13 @@ struct BookshelfView: View {
             
 ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 12) {
+                    Button(isSelecting ? "完成" : "管理") {
+                        withAnimation {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedBookIds.removeAll() }
+                        }
+                    }
+
                     Button(action: { showingSearch = true }) {
                         Image(systemName: "magnifyingglass")
                     }
@@ -193,6 +217,55 @@ ToolbarItem(placement: .navigationBarTrailing) {
     }
 
     @ViewBuilder
+    private func toggleBookSelection(_ book: Book) {
+        if selectedBookIds.contains(book.bookId) {
+            selectedBookIds.remove(book.bookId)
+        } else {
+            selectedBookIds.insert(book.bookId)
+        }
+    }
+
+    /// 批量操作栏
+    private var batchBar: some View {
+        HStack(spacing: 14) {
+            Button("全选") {
+                selectedBookIds = Set(viewModel.books.map { $0.bookId })
+            }
+            .font(.subheadline)
+
+            Button("反选") {
+                let all = Set(viewModel.books.map { $0.bookId })
+                selectedBookIds = all.subtracting(selectedBookIds)
+            }
+            .font(.subheadline)
+
+            Button("加入分组") {
+                showingGroupPicker = true
+            }
+            .font(.subheadline)
+            .disabled(selectedBookIds.isEmpty)
+
+            Spacer()
+
+            Text("已选 \(selectedBookIds.count)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Button(role: .destructive) {
+                viewModel.deleteBooks(ids: selectedBookIds)
+                selectedBookIds.removeAll()
+                isSelecting = false
+            } label: {
+                Text("删除")
+                    .font(.subheadline)
+            }
+            .disabled(selectedBookIds.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
     private var bookshelfContent: some View {
         switch viewModel.viewMode {
         case .grid:
@@ -210,21 +283,39 @@ ToolbarItem(placement: .navigationBarTrailing) {
                 GridItem(.flexible())
             ], spacing: 16) {
                 ForEach(viewModel.books, id: \.bookId) { book in
-                    NavigationLink(destination: ReaderView(book: book)) {
-                        BookGridItemView(book: book)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
+                    if isSelecting {
                         Button {
-                            changeSourceBook = book
+                            toggleBookSelection(book)
                         } label: {
-                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
-                        }
+                            ZStack(alignment: .topLeading) {
+                                BookGridItemView(book: book)
 
-                        Button(role: .destructive) {
-                            viewModel.removeBook(book)
-                        } label: {
-                            Label("删除", systemImage: "trash")
+                                Image(systemName: selectedBookIds.contains(book.bookId)
+                                      ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .foregroundColor(selectedBookIds.contains(book.bookId) ? .accentColor : .white)
+                                    .padding(6)
+                                    .shadow(radius: 2)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink(destination: ReaderView(book: book)) {
+                            BookGridItemView(book: book)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                changeSourceBook = book
+                            } label: {
+                                Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                            }
+
+                            Button(role: .destructive) {
+                                viewModel.removeBook(book)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -254,20 +345,35 @@ ToolbarItem(placement: .navigationBarTrailing) {
     private var bookListView: some View {
         List {
             ForEach(viewModel.books, id: \.bookId) { book in
-                NavigationLink(destination: ReaderView(book: book)) {
-                    BookListItemView(book: book)
-                }
-                .contextMenu {
+                if isSelecting {
                     Button {
-                        changeSourceBook = book
+                        toggleBookSelection(book)
                     } label: {
-                        Label("换源", systemImage: "arrow.triangle.2.circlepath")
-                    }
+                        HStack {
+                            Image(systemName: selectedBookIds.contains(book.bookId)
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(selectedBookIds.contains(book.bookId) ? .accentColor : .secondary)
 
-                    Button(role: .destructive) {
-                        viewModel.removeBook(book)
-                    } label: {
-                        Label("删除", systemImage: "trash")
+                            BookListItemView(book: book)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    NavigationLink(destination: ReaderView(book: book)) {
+                        BookListItemView(book: book)
+                    }
+                    .contextMenu {
+                        Button {
+                            changeSourceBook = book
+                        } label: {
+                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                        }
+
+                        Button(role: .destructive) {
+                            viewModel.removeBook(book)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
                     }
                 }
             }

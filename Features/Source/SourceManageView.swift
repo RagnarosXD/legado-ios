@@ -60,6 +60,7 @@ struct SourceManageView: View {
             }
             .navigationTitle("书源管理")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $viewModel.searchText, prompt: "搜索名称 / 地址 / 分组")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(isEditMode ? "取消" : "编辑") {
@@ -75,6 +76,12 @@ struct SourceManageView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
                         Menu {
+                            Picker("排序", selection: $viewModel.sortBy) {
+                                ForEach(SourceSortBy.allCases) { sort in
+                                    Text(sort.title).tag(sort)
+                                }
+                            }
+                            Divider()
                             Button {
                                 inferTypes()
                             } label: {
@@ -92,6 +99,11 @@ struct SourceManageView: View {
                             Button(action: exportAllSources) {
                                 Label("导出全部", systemImage: "square.and.arrow.up")
                             }
+
+                            Button(action: exportSelectedSources) {
+                                Label("导出选中（\(selectedSources.count)）", systemImage: "square.and.arrow.up.on.square")
+                            }
+                            .disabled(selectedSources.isEmpty)
                         } label: {
                             Image(systemName: "ellipsis")
                         }
@@ -283,6 +295,46 @@ struct SourceManageView: View {
                 .tint(.blue)
             }
         }
+        // 长按菜单（对齐 Android BookSourceAdapter 的长按项）
+        .contextMenu {
+            Button {
+                viewModel.moveToTop(source)
+            } label: {
+                Label("置顶", systemImage: "arrow.up.to.line")
+            }
+
+            Button {
+                viewModel.moveToBottom(source)
+            } label: {
+                Label("置底", systemImage: "arrow.down.to.line")
+            }
+
+            Button {
+                editViewModel = SourceEditViewModel(source: source)
+                showingEdit = true
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+
+            if source.hasExplore {
+                Button {
+                    viewModel.toggleExplore(source)
+                } label: {
+                    Label(
+                        source.enabledExplore ? "停用发现" : "启用发现",
+                        systemImage: "safari"
+                    )
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                viewModel.deleteSource(source)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
     }
 
     // MARK: - 批量校验
@@ -330,7 +382,15 @@ struct SourceManageView: View {
     }
 
     private func exportAllSources() {
-        guard let data = viewModel.exportAllSources() else { return }
+        guard let data = viewModel.exportSources() else { return }
+        exportDocument = JSONDataDocument(data: data)
+        exportFileName = makeExportFileName()
+        showingExporter = true
+    }
+
+    private func exportSelectedSources() {
+        guard !selectedSources.isEmpty,
+              let data = viewModel.exportSources(ids: selectedSources) else { return }
         exportDocument = JSONDataDocument(data: data)
         exportFileName = makeExportFileName()
         showingExporter = true

@@ -209,6 +209,32 @@ final class BookshelfViewModel: ObservableObject {
         await loadBooks()
     }
     
+    /// 批量删除（对齐 Android 批量管理的删除）
+    func deleteBooks(ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        let context = CoreDataStack.shared.viewContext
+
+        for book in books where ids.contains(book.bookId) {
+            context.delete(book)
+        }
+        books.removeAll { ids.contains($0.bookId) }
+        try? CoreDataStack.shared.save()
+        AppLogger.info("Bookshelf", "批量删除 \(ids.count) 本")
+    }
+
+    /// 批量加入分组（Android add_to_group：位掩码 OR）
+    func addBooks(ids: Set<String>, toGroup groupId: Int64) {
+        guard !ids.isEmpty else { return }
+        let context = CoreDataStack.shared.viewContext
+
+        for book in books where ids.contains(book.bookId) {
+            book.group = book.group | groupId
+        }
+        try? CoreDataStack.shared.save()
+        Task { await loadBooks() }
+        AppLogger.info("Bookshelf", "批量加入分组 \(ids.count) 本 → \(groupId)")
+    }
+
     func removeBook(_ book: Book) {
         let id = book.bookId
         CoreDataStack.shared.viewContext.delete(book)

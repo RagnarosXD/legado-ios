@@ -30,6 +30,12 @@ struct PageConfig: @unchecked Sendable {
     var textColor: UIColor = UIColor(red: 0x3E / 255, green: 0x3D / 255, blue: 0x3B / 255, alpha: 1)
     /// 页面边距（Android paddingTop/Bottom 6dp、Left/Right 16dp）
     var margins: UIEdgeInsets = UIEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
+    /// 章节标题（Android titleMode：nil 表示隐藏）
+    var titleText: String?
+    /// 标题字号增量（Android titleSize，默认 0）
+    var titleSizeDelta: CGFloat = 0
+    /// 标题对齐（Android titleMode 0=居左 1=居中）
+    var titleAlignment: NSTextAlignment = .left
     var containerSize: CGSize
     var font: UIFont
 
@@ -262,7 +268,26 @@ final class PageSplitter {
             attributes[.kern] = config.kern
         }
 
-        return NSAttributedString(string: normalizeText(text), attributes: attributes)
+        let body = NSAttributedString(string: normalizeText(text), attributes: attributes)
+
+        // 章节标题（Android titleMode / titleSize）：作为正文第一段，字号更大、可居中
+        guard let title = config.titleText, !title.isEmpty else { return body }
+
+        let titleStyle = NSMutableParagraphStyle()
+        titleStyle.alignment = config.titleAlignment
+        titleStyle.paragraphSpacing = config.paragraphSpacing
+        titleStyle.lineBreakMode = .byWordWrapping
+
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: config.fontSize + config.titleSizeDelta),
+            .paragraphStyle: titleStyle,
+            .foregroundColor: config.textColor
+        ]
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: title + "\n", attributes: titleAttributes))
+        result.append(body)
+        return result
     }
 
     /// 兼容旧调用
@@ -352,6 +377,9 @@ final class PageSplitCache: @unchecked Sendable {
         hasher.combine(config.letterSpacingEm)
         hasher.combine(config.firstLineIndentChars)
         hasher.combine(config.justified)
+        hasher.combine(config.titleText ?? "")
+        hasher.combine(config.titleSizeDelta)
+        hasher.combine(config.titleAlignment.rawValue)
         hasher.combine(config.margins.top)
         hasher.combine(config.margins.left)
         hasher.combine(config.margins.bottom)

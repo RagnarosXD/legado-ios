@@ -198,7 +198,8 @@ struct PagedReaderView: View {
         let config = viewModel.makePageConfig(
             containerSize: containerSize,
             extraTop: extraInsets.top,
-            extraBottom: extraInsets.bottom
+            extraBottom: extraInsets.bottom,
+            chapterTitle: viewModel.currentChapter?.title
         )
 
         // 对齐 Android：分页在 IO 线程增量产出（TextChapterLayout 用协程分页），

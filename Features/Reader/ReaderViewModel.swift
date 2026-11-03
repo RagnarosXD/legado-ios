@@ -76,7 +76,11 @@ class ReaderViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(textJustified, forKey: "reader.justified") }
     }
     /// 字体族（为空用系统字体）
-    @Published var fontFamily: String? = nil {
+    @Published var fontFamily: String? = nil
+    /// 章节标题显示方式（Android titleMode）：0 居左、1 居中、2 隐藏
+    @Published var chapterTitleMode: Int = 0 { didSet { objectWillChange.send() } }
+    /// 标题字号增量（Android titleSize）
+    @Published var chapterTitleSizeDelta: CGFloat = 0 { didSet { objectWillChange.send() } } {
         didSet { UserDefaults.standard.set(fontFamily, forKey: "reader.fontFamily") }
     }
     
@@ -158,13 +162,18 @@ class ReaderViewModel: ObservableObject {
         return scene?.keyWindow?.safeAreaInsets ?? .zero
     }
 
-    func makePageConfig(containerSize: CGSize, extraTop: CGFloat = 0, extraBottom: CGFloat = 0) -> PageConfig {
+    func makePageConfig(
+        containerSize: CGSize,
+        extraTop: CGFloat = 0,
+        extraBottom: CGFloat = 0,
+        chapterTitle: String? = nil
+    ) -> PageConfig {
         // 灵动岛机型顶部安全区约 59pt、Home 条约 34pt，取两者较大值
         let safeArea = Self.windowSafeArea
         let topInset = max(extraTop, safeArea.top)
         let bottomInset = max(extraBottom, safeArea.bottom)
 
-        return PageConfig.from(
+        var config = PageConfig.from(
             fontSize: fontSize,
             lineSpacingExtra: lineSpacing,
             paragraphSpacingExtra: paragraphSpacing,
@@ -180,6 +189,15 @@ class ReaderViewModel: ObservableObject {
             containerSize: containerSize,
             fontFamily: fontFamily
         )
+
+        // Android titleMode：0 居左、1 居中、2 隐藏
+        if chapterTitleMode != 2, let chapterTitle, !chapterTitle.isEmpty {
+            config.titleText = chapterTitle
+            config.titleAlignment = chapterTitleMode == 1 ? .center : .left
+            config.titleSizeDelta = chapterTitleSizeDelta
+        }
+
+        return config
     }
 
     private func themeFromStorage(_ raw: String) -> ReaderTheme {
@@ -735,10 +753,31 @@ struct ReaderSettingsView: View {
             Form {
                 Section(header: Text("字体")) {
                     Stepper("字号：\(Int(viewModel.fontSize))", value: $viewModel.fontSize, in: 12...32, step: 1)
+                    Stepper(
+                        "字距：\(String(format: "%.1f", Double(viewModel.letterSpacing)))",
+                        value: $viewModel.letterSpacing,
+                        in: 0...1,
+                        step: 0.1
+                    )
                 }
-                
+
                 Section(header: Text("间距")) {
-                    Stepper("行距：\(Int(viewModel.lineSpacing))", value: $viewModel.lineSpacing, in: 4...20, step: 1)
+                    Stepper("行距：\(Int(viewModel.lineSpacing))", value: $viewModel.lineSpacing, in: 0...30, step: 1)
+                    Stepper("段距：\(Int(viewModel.paragraphSpacing))", value: $viewModel.paragraphSpacing, in: 0...10, step: 1)
+                    Stepper("缩进：\(Int(viewModel.firstLineIndentChars)) 字", value: $viewModel.firstLineIndentChars, in: 0...4, step: 1)
+                    Toggle("两端对齐", isOn: $viewModel.textJustified)
+                }
+
+                // 对齐 Android ReadStyleDialog 的标题设置（titleMode / titleSize）
+                Section(header: Text("章节标题")) {
+                    Picker("显示方式", selection: $viewModel.chapterTitleMode) {
+                        Text("居左").tag(0)
+                        Text("居中").tag(1)
+                        Text("隐藏").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Stepper("标题字号 +\(Int(viewModel.chapterTitleSizeDelta))", value: $viewModel.chapterTitleSizeDelta, in: 0...12, step: 1)
                 }
                 
                 Section(header: Text("主题")) {

@@ -15,6 +15,62 @@ struct SearchResultView: View {
     @State private var openingResultId: UUID?
     @State private var choosingMerged: SearchViewModel.MergedSearchResult?
 
+    /// 搜索历史（对齐 Android：按最后使用时间倒序，长按删除，可清空）
+    private var historySection: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("搜索历史")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Spacer()
+
+                    Button("清空") {
+                        viewModel.clearHistory()
+                    }
+                    .font(.caption)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 96), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(viewModel.history, id: \.word) { item in
+                        Text(item.word)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color(.secondarySystemBackground)))
+                            .onTapGesture {
+                                viewModel.searchText = item.word
+                                Task {
+                                    await viewModel.search(
+                                        keyword: item.word,
+                                        sources: viewModel.selectedSources
+                                    )
+                                }
+                            }
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    viewModel.deleteKeyword(item.word)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, 16)
+
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 搜索进度：已搜索书源数 / 书源总数
@@ -37,6 +93,8 @@ struct SearchResultView: View {
             if viewModel.mergedResults.isEmpty {
                 if viewModel.isSearching {
                     Spacer()
+                } else if !viewModel.history.isEmpty {
+                    historySection
                 } else {
                     EmptyStateView(
                         title: "搜索结果",
@@ -62,6 +120,7 @@ struct SearchResultView: View {
         }
         .navigationTitle("搜索")
         .searchable(text: $viewModel.searchText, prompt: "搜索书籍")
+        .task { viewModel.loadHistory() }
         .onSubmit(of: .search) {
             Task {
                 await viewModel.search(keyword: viewModel.searchText, sources: viewModel.selectedSources)

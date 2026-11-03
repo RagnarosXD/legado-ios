@@ -11,6 +11,8 @@ import CoreData
 @MainActor
 class SearchViewModel: ObservableObject {
     @Published var searchText: String = ""
+    /// 搜索历史（对齐 Android search_keywords 表：按最后使用时间倒序）
+    @Published var history: [SearchKeyword] = []
     @Published var searchResults: [SearchResult] = []
     @Published var isSearching = false
     @Published var errorMessage: String?
@@ -82,6 +84,59 @@ class SearchViewModel: ObservableObject {
     }
     
     // MARK: - 执行搜索
+    // MARK: - 搜索历史
+
+    func loadHistory() {
+        let request: NSFetchRequest<SearchKeyword> = SearchKeyword.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "lastUseTime", ascending: false)]
+        request.fetchLimit = 50
+        history = (try? CoreDataStack.shared.viewContext.fetch(request)) ?? []
+    }
+
+    /// 记录关键词：命中则 usage+1 并刷新时间，否则插入
+    private func recordKeyword(_ keyword: String) {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let context = CoreDataStack.shared.viewContext
+        let request: NSFetchRequest<SearchKeyword> = SearchKeyword.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "word == %@", trimmed)
+
+        if let existing = try? context.fetch(request).first {
+            existing.usage += 1
+            existing.lastUseTime = Int64(Date().timeIntervalSince1970 * 1000)
+        } else {
+            let item = SearchKeyword.create(in: context, word: trimmed)
+            item.usage = 1
+            item.lastUseTime = Int64(Date().timeIntervalSince1970 * 1000)
+        }
+
+        try? CoreDataStack.shared.save()
+        loadHistory()
+    }
+
+    func deleteKeyword(_ word: String) {
+        let context = CoreDataStack.shared.viewContext
+        let request: NSFetchRequest<SearchKeyword> = SearchKeyword.fetchRequest()
+        request.predicate = NSPredicate(format: "word == %@", word)
+        if let items = try? context.fetch(request) {
+            for item in items { context.delete(item) }
+            try? CoreDataStack.shared.save()
+        }
+        loadHistory()
+    }
+
+    func clearHistory() {
+        let context = CoreDataStack.shared.viewContext
+        let request: NSFetchRequest<SearchKeyword> = SearchKeyword.fetchRequest()
+        if let items = try? context.fetch(request) {
+            for item in items { context.delete(item) }
+            try? CoreDataStack.shared.save()
+        }
+        loadHistory()
+    }
+
     func search(keyword: String, sources: [BookSource]) async {
         guard !keyword.isEmpty else {
             searchResults = []
@@ -96,6 +151,7 @@ class SearchViewModel: ObservableObject {
         searchedSourceCount = 0
         // 聚合排序依赖关键词
         searchText = keyword
+        recordKeyword(keyword)
 
         let allEnabled = sources.filter { $0.enabled && $0.searchUrl != nil }
         // 本版本只有文本阅读器：有声/漫画/图片源的响应结构完全不同，混进文本解析会崩

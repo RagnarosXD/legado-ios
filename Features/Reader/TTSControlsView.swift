@@ -314,6 +314,11 @@ struct TTSControlsView: View {
             }
         )
     }
+
+    private func formatRemaining(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
 }
 
 // MARK: - 声音选择器
@@ -405,8 +410,4 @@ struct VoicePickerView: View {
         )
     }
 
-    private func formatRemaining(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 }

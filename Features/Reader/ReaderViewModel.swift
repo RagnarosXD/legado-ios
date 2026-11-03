@@ -816,39 +816,64 @@ struct ChapterListView: View {
     let book: Book
     @Environment(\.dismiss) var dismiss
     
+    /// 倒序显示（对齐 Android TocActivity 的「反转目录」）
+    @State private var isReversed = false
+
+    private var orderedChapters: [(index: Int, chapter: BookChapter)] {
+        let list = Array(viewModel.chapters.enumerated())
+            .map { (index: $0.offset, chapter: $0.element) }
+        return isReversed ? list.reversed() : list
+    }
+
     var body: some View {
         NavigationView {
-            List {
-                ForEach(Array(viewModel.chapters.enumerated()), id: \.element.chapterId) { index, chapter in
-                    Button(action: {
-                        viewModel.jumpToChapter(index)
-                        dismiss()
-                    }) {
-                        HStack {
-                            Text("\(index + 1)")
-                                .frame(width: 40)
-                            
-                            Text(chapter.title)
-                                .lineLimit(2)
-                            
-                            Spacer()
-                            
-                            if index == viewModel.currentChapterIndex {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(.blue)
-                            }
-                            
-                            if chapter.isCached {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .foregroundColor(.green)
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(orderedChapters, id: \.chapter.chapterId) { item in
+                        Button(action: {
+                            viewModel.jumpToChapter(item.index)
+                            dismiss()
+                        }) {
+                            HStack {
+                                Text("\(item.index + 1)")
                                     .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 40, alignment: .leading)
+
+                                Text(item.chapter.title)
+                                    .font(item.index == viewModel.currentChapterIndex ? .body.weight(.semibold) : .body)
+                                    .foregroundColor(item.index == viewModel.currentChapterIndex ? .accentColor : .primary)
+                                    .lineLimit(2)
+
+                                Spacer()
+
+                                if item.chapter.isCached {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .foregroundColor(.green)
+                                        .font(.caption)
+                                }
                             }
+                            .id(item.chapter.chapterId)
                         }
                     }
                 }
+                .onAppear {
+                    // 打开目录自动定位到当前章
+                    if viewModel.currentChapterIndex >= 0,
+                       viewModel.currentChapterIndex < viewModel.chapters.count {
+                        let current = viewModel.chapters[viewModel.currentChapterIndex]
+                        proxy.scrollTo(current.chapterId, anchor: .center)
+                    }
+                }
             }
-            .navigationTitle("目录")
+            .navigationTitle("目录 \(viewModel.currentChapterIndex + 1)/\(viewModel.chapters.count)")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(isReversed ? "正序" : "倒序") {
+                        isReversed.toggle()
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
                         dismiss()

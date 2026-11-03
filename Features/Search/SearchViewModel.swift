@@ -314,7 +314,9 @@ class SearchViewModel: ObservableObject {
             let leftScore = matchScore(lhs)
             let rightScore = matchScore(rhs)
             if leftScore != rightScore { return leftScore > rightScore }
-            // 同分时短标题优先（更接近精确命中）
+            // 同档按命中源数降序（对齐 Android SearchModel.mergeItems）
+            if lhs.entries.count != rhs.entries.count { return lhs.entries.count > rhs.entries.count }
+            // 再按短标题优先（更接近精确命中）
             if lhs.name.count != rhs.name.count { return lhs.name.count < rhs.name.count }
             return lhs.name < rhs.name
         }

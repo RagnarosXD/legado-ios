@@ -414,7 +414,9 @@ class SourceViewModel: ObservableObject {
     private func importFromJSON(_ sources: [[String: Any]]) -> Int {
         let context = CoreDataStack.shared.viewContext
 
-        var importedCount = 0
+        var added = 0
+        var updated = 0
+
         for sourceData in sources {
             guard let url = sourceData["bookSourceUrl"] as? String, !url.isEmpty,
                   let name = sourceData["bookSourceName"] as? String, !name.isEmpty else {
@@ -422,11 +424,37 @@ class SourceViewModel: ObservableObject {
             }
 
             let source = findOrCreateSource(for: sourceData, in: context)
+            // 新建对象尚未保存，据此区分「新增 / 更新」
+            let isNew = context.insertedObjects.contains(source)
+
+            // 对齐 Android 导入的保留策略：不覆盖本地的启用状态、排序与已有分组
+            let keptEnabled = source.enabled
+            let keptOrder = source.customOrder
+            let keptGroup = source.bookSourceGroup
+            let keptType = source.bookSourceType
+
             source.bookSourceUrl = url
             source.bookSourceName = name
             applySourceData(source, sourceData)
-            importedCount += 1
+
+            if isNew {
+                added += 1
+            } else {
+                source.enabled = keptEnabled
+                source.customOrder = keptOrder
+                if (sourceData["bookSourceGroup"] as? String ?? "").isEmpty {
+                    source.bookSourceGroup = keptGroup
+                }
+                // 类型由 Android 的 bookSourceType 决定，空值时沿用本地
+                if source.bookSourceType == 0, keptType != 0 {
+                    source.bookSourceType = keptType
+                }
+                updated += 1
+            }
         }
+
+        let importedCount = added + updated
+        AppLogger.info("Source", "导入完成 新增=\(added) 更新=\(updated)")
         
         do {
             try CoreDataStack.shared.save()

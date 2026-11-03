@@ -23,6 +23,8 @@ struct BookshelfView: View {
     @State private var showingGroupPicker = false
     /// 网格列数（对齐 Android bookshelfLayout：≥2 为网格列数）
     @AppStorage("bookshelfColumns") private var columns: Int = 3
+    /// 是否显示书名（对齐 Android showBookname）
+    @AppStorage("bookshelfShowName") private var showBookName: Bool = true
     
     var body: some View {
         Group {
@@ -100,6 +102,8 @@ ToolbarItem(placement: .navigationBarTrailing) {
                             Text("5 列").tag(5)
                             Text("6 列").tag(6)
                         }
+                        Divider()
+                        Toggle("显示书名", isOn: $showBookName)
                     } label: {
                         Image(systemName: "square.grid.2x2")
                     }
@@ -305,7 +309,7 @@ ToolbarItem(placement: .navigationBarTrailing) {
                             toggleBookSelection(book)
                         } label: {
                             ZStack(alignment: .topLeading) {
-                                BookGridItemView(book: book)
+                                BookGridItemView(book: book, showName: showBookName)
 
                                 Image(systemName: selectedBookIds.contains(book.bookId)
                                       ? "checkmark.circle.fill" : "circle")
@@ -318,7 +322,7 @@ ToolbarItem(placement: .navigationBarTrailing) {
                         .buttonStyle(.plain)
                     } else {
                         NavigationLink(destination: ReaderView(book: book)) {
-                            BookGridItemView(book: book)
+                            BookGridItemView(book: book, showName: showBookName)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -407,7 +411,8 @@ ToolbarItem(placement: .navigationBarTrailing) {
 // MARK: - 网格项
 struct BookGridItemView: View {
     let book: Book
-    
+    var showName: Bool = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // 封面
@@ -429,18 +434,20 @@ struct BookGridItemView: View {
                     }
                 }
             
-            // 书名
-            Text(book.name)
-                .font(.caption)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .foregroundColor(.primary)
-            
-            // 作者
-            Text(book.author)
-                .font(.caption2)
-                .lineLimit(1)
-                .foregroundColor(.secondary)
+            if showName {
+                // 书名
+                Text(book.name)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .foregroundColor(.primary)
+
+                // 作者
+                Text(book.author)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .foregroundColor(.secondary)
+            }
             
             // 进度条：Android 在「尚未开始阅读」时不显示
             if !book.hasNotStartedReading {

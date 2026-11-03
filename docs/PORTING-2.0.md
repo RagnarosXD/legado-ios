@@ -214,3 +214,21 @@
 - 分页仍是「整章后台分页 + 首屏等待」，未做 Android 的逐页流式产出（`Channel<TextPage>`）
 - 仿真翻页动画为自绘近似，非 Android 的贝塞尔仿真实现
 - 书签面板条目结构未逐条对照
+## 十二、P3：书架 / 详情 / 搜索 / 发现 / 书源（1.3.18 → 1.3.24）
+
+| 模块 | 已对齐 | Android 依据 |
+| --- | --- | --- |
+| 书架 | 分组条（位掩码 `(group & gid) > 0`）、6 种排序（最近/更新/书名/手动/综合/作者）、未读角标、读到章节、未开始阅读隐藏进度条、网格 2~6 列、书名显示开关、批量管理（全选/反选/加入分组/删除） | `BookshelfFragment2.kt`、`BooksAdapterGrid/List.kt`、`BookshelfManageActivity.kt`、`AppConfig.kt:209-343` |
+| 详情 | 换源走完整流程（迁移 bookUrl/清旧章/重拉目录）、加入书架按钮、书籍信息补类型/分组/地址/需登录标记、可直接进入书源编辑 | `BookInfoActivity.kt:610-1087`、`ChangeBookSourceViewModel.kt:682-716` |
+| 目录 | 倒序切换、打开自动定位当前章、标题显示 `当前/总数`、缓存标记 | `TocActivity.kt:171-177`、`ChapterListFragment.kt:371-391` |
+| 搜索 | 历史（累加 usage/长按删除/清空/复用）、匹配度 + 命中源数排序、按分组整组勾选 | `SearchModel.kt:153-234`、`SearchKeywordDao.kt`、`SearchScope.kt` |
+| 发现 | 新 Tab、书源维度列表、分类 chips（`名称::url`，`&&`/换行分隔）、内容页 `{{page}}` 翻页 + 去重加载更多 + 加入书架 | `ExploreFragment.kt`、`ExploreShowActivity/ViewModel.kt`、`BookSourceExtensions.kt:43-105` |
+| 书源管理 | 关键词搜索、7 种排序、长按菜单（置顶/置底/编辑/切换发现/删除）、导出全部/导出选中、类型/需登录/有发现/已停用筛选（带数量） | `BookSourceActivity.kt:300-475`、`BookSourceAdapter.kt:123-291` |
+| 导入 | 区分新增/更新、保留本地启用状态/排序/分组（对齐 importKeep* 策略） | `ImportBookSourceViewModel.kt:45-53,133-165` |
+
+### P3 遗留（低优先级）
+
+- 简介 `<useweb>` / `<usehtml>` / `<md>` 富文本渲染
+- 分卷（`isVolume`）：`BookChapter` 尚无该字段
+- 搜索范围对话框（`SearchScopeDialog` 可视化选择）
+- 书源编辑：段评分组、JSON 预览/二维码分享、规则自动补全

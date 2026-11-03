@@ -262,6 +262,8 @@ struct ReaderView: View {
                 }
             }
             .onAppear {
+                // 阅读时常亮（设置项 reader.keepScreenOn）
+                UIApplication.shared.isIdleTimerDisabled = UserDefaults.standard.bool(forKey: "reader.keepScreenOn")
                 viewModel.loadBook(book)
                 autoPageTurnManager.onTurnPage = { viewModel.turnToNextPage() }
                 autoPageTurnManager.onChapterComplete = {
@@ -275,6 +277,7 @@ struct ReaderView: View {
                 readingEnhancementManager.startReadingSession()
             }
             .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
                 viewModel.saveProgress()
                 ttsManager.stop()
                 autoPageTurnManager.stop()

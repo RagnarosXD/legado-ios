@@ -99,6 +99,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
     
+    /// 阅读方向锁定（设置项 reader.screenOrientation：auto / portrait）
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        let mode = UserDefaults.standard.string(forKey: "reader.screenOrientation") ?? "auto"
+        return mode == "portrait" ? .portrait : .all
+    }
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         NotificationCenter.default.post(name: .openURLNotification, object: url)
         return true

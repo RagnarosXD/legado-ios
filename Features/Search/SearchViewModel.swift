@@ -172,7 +172,9 @@ class SearchViewModel: ObservableObject {
         // 并发搜索：任务里通过 await 回到 MainActor 执行 searchInSource，
         // 耗时主要在 await 网络（此时主线程已释放），解析仍在主线程串行，
         // 既不跨线程碰 Core Data，又能把网络等待叠起来
-        let deadline = Date().addingTimeInterval(90)
+        // 单次搜索超时可配（设置项 searchTimeout，默认 90 秒；对齐 Android 每源 30 秒的整体超时）
+        let timeout = UserDefaults.standard.object(forKey: "searchTimeout") as? Double ?? 90
+        let deadline = Date().addingTimeInterval(timeout)
 
         await withTaskGroup(of: (name: String, results: [SearchResult], failure: String?).self) { group in
             var pending = enabledSources

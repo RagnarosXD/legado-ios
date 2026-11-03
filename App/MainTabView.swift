@@ -44,6 +44,11 @@ struct MainTabView: View {
 struct SettingsView: View {
     @State private var showingAbout = false
     @State private var showingQRScanner = false
+
+    // 阅读与搜索偏好
+    @AppStorage("reader.keepScreenOn") private var keepScreenOn = false
+    @AppStorage("reader.screenOrientation") private var screenOrientation = "auto"
+    @AppStorage("searchTimeout") private var searchTimeout: Double = 90
     
     var body: some View {
         NavigationView {
@@ -60,6 +65,22 @@ struct SettingsView: View {
                     
                     NavigationLink("主题") {
                         ThemeSettingsView()
+                    }
+
+                    Toggle("阅读时常亮", isOn: $keepScreenOn)
+
+                    Picker("屏幕方向", selection: $screenOrientation) {
+                        Text("跟随系统").tag("auto")
+                        Text("仅竖屏").tag("portrait")
+                    }
+                }
+
+                Section(header: Label("搜索", systemImage: "magnifyingglass")) {
+                    Picker("单次搜索超时", selection: $searchTimeout) {
+                        Text("15 秒").tag(15.0)
+                        Text("30 秒").tag(30.0)
+                        Text("60 秒").tag(60.0)
+                        Text("90 秒").tag(90.0)
                     }
                 }
                 

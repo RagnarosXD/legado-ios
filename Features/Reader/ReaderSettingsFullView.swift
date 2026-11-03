@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ReaderSettingsFullView: View {
     @Environment(\.dismiss) var dismiss
@@ -78,11 +79,22 @@ struct ReaderSettingsFullView: View {
                     
                     Picker("字体", selection: $fontFamily) {
                         Text("系统").tag("System")
-                        Text("宋体").tag("Songti")
-                        Text("黑体").tag("Heiti")
-                        Text("楷体").tag("Kaiti")
+                        Text("宋体").tag("Songti SC")
+                        Text("黑体").tag("Heiti SC")
+                        Text("楷体").tag("Kaiti SC")
+                        Text("苹方").tag("PingFang SC")
+
+                        ForEach(FontImporter.importedFonts) { font in
+                            Text(font.display).tag(font.postScript)
+                        }
                     }
                     .pickerStyle(.menu)
+
+                    Button {
+                        importFontFile()
+                    } label: {
+                        Label("导入字体文件", systemImage: "textformat.alt")
+                    }
                 }
                 
                 Section(header: Text("翻页")) {
@@ -177,6 +189,17 @@ struct ReaderSettingsFullView: View {
         fontFamily = storedFontFamily
         showStatusBar = storedShowStatusBar
         clickToFlip = storedClickToFlip
+    }
+
+    private func importFontFile() {
+        DocumentPickerHelper.shared.present(contentTypes: [.font, .data]) { urls in
+            guard let url = urls.first,
+                  let font = FontImporter.registerFont(from: url) else {
+                return
+            }
+            FontImporter.save(font)
+            fontFamily = font.postScript
+        }
     }
 }
 

@@ -55,6 +55,10 @@ class ReaderViewModel: ObservableObject {
     }
     @Published var backgroundColor: Color = .white
     @Published var textColor: Color = .black
+    /// 自定义配色（对齐 Android ReadBookConfig 的 bgStr / textColor）
+    @Published var useCustomTheme: Bool = false
+    @Published var customBackground: Color = Color(red: 0xEE / 255, green: 0xEE / 255, blue: 0xEE / 255)
+    @Published var customText: Color = Color(red: 0x3E / 255, green: 0x3D / 255, blue: 0x3B / 255)
     
     // MARK: - 新增阅读设置
     @Published var paragraphSpacing: CGFloat = 2 {
@@ -114,6 +118,20 @@ class ReaderViewModel: ObservableObject {
 
         if let storedTheme = defaults.string(forKey: "reader.theme") {
             applyTheme(themeFromStorage(storedTheme))
+        }
+
+        // 自定义配色
+        if defaults.bool(forKey: "reader.useCustomTheme") {
+            let storedBackground = color(from: defaults.array(forKey: "reader.customBackground") as? [Double])
+            let storedText = color(from: defaults.array(forKey: "reader.customText") as? [Double])
+
+            if let storedBackground, let storedText {
+                useCustomTheme = true
+                backgroundColor = storedBackground
+                textColor = storedText
+                customBackground = storedBackground
+                customText = storedText
+            }
         }
 
         // 排版精度设置（0 视为未设置，因为 0 是"无缩进/无字距"的合法值，用 object 判断更准）
@@ -456,10 +474,43 @@ class ReaderViewModel: ObservableObject {
     
     func applyTheme(_ theme: ReaderTheme) {
         self.theme = theme
+        useCustomTheme = false
         backgroundColor = theme.backgroundColor
         textColor = theme.textColor
 
         UserDefaults.standard.set(storageThemeValue(theme), forKey: "reader.theme")
+        UserDefaults.standard.set(false, forKey: "reader.useCustomTheme")
+    }
+
+    /// 应用自定义配色（背景 + 正文色），并持久化
+    func applyCustomTheme(background: Color, textColor: Color) {
+        useCustomTheme = true
+        backgroundColor = background
+        self.textColor = textColor
+        customBackground = background
+        customText = textColor
+
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "reader.useCustomTheme")
+        defaults.set(colorComponents(background), forKey: "reader.customBackground")
+        defaults.set(colorComponents(textColor), forKey: "reader.customText")
+    }
+
+    private func colorComponents(_ color: Color) -> [Double] {
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [Double(r), Double(g), Double(b), Double(a)]
+    }
+
+    private func color(from components: [Double]?) -> Color? {
+        guard let components, components.count == 4 else { return nil }
+        return Color(
+            red: components[0],
+            green: components[1],
+            blue: components[2],
+            opacity: components[3]
+        )
     }
 
     private func storageThemeValue(_ theme: ReaderTheme) -> String {
@@ -785,6 +836,24 @@ struct ReaderSettingsView: View {
                     Stepper("标题字号 +\(Int(viewModel.chapterTitleSizeDelta))", value: $viewModel.chapterTitleSizeDelta, in: 0...12, step: 1)
                 }
                 
+                Section(header: Text("自定义配色")) {
+                    ColorPicker("背景色", selection: $viewModel.customBackground)
+                    ColorPicker("文字色", selection: $viewModel.customText)
+
+                    Button("应用自定义配色") {
+                        viewModel.applyCustomTheme(
+                            background: viewModel.customBackground,
+                            textColor: viewModel.customText
+                        )
+                    }
+
+                    if viewModel.useCustomTheme {
+                        Text("当前使用自定义配色")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 Section(header: Text("主题")) {
                     Button("亮色") {
                         viewModel.applyTheme(.light)

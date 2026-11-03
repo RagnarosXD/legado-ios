@@ -16,6 +16,10 @@ struct LegadoApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
+                .task {
+                    // 重新注册用户导入的字体（进程重启后需要重新注册）
+                    FontImporter.registerAll()
+                }
                 .onOpenURL { url in
                     handleURL(url)
                 }

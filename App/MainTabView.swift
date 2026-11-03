@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Network
+import CoreText
 import UniformTypeIdentifiers
 
 struct MainTabView: View {
@@ -1215,5 +1216,90 @@ final class NetworkMonitor {
             self?.isWiFi = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
         }
         monitor.start(queue: queue)
+    }
+}
+
+// MARK: - 字体导入（对齐 Android 的自定义字体）
+
+enum FontImporter {
+
+    struct ImportedFont: Codable, Identifiable {
+        let postScript: String
+        let display: String
+
+        var id: String { postScript }
+    }
+
+    /// 已导入字体（持久化在 UserDefaults）
+    static var importedFonts: [ImportedFont] {
+        guard let data = UserDefaults.standard.data(forKey: "reader.importedFonts"),
+              let list = try? JSONDecoder().decode([ImportedFont].self, from: data) else {
+            return []
+        }
+        return list
+    }
+
+    static func save(_ font: ImportedFont) {
+        var list = importedFonts.filter { $0.postScript != font.postScript }
+        list.append(font)
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: "reader.importedFonts")
+        }
+    }
+
+    static var fontsDirectory: URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("Fonts", isDirectory: true)
+    }
+
+    /// 导入字体文件：拷贝到 Documents/Fonts 并注册到进程
+    static func registerFont(from url: URL) -> ImportedFont? {
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: fontsDirectory, withIntermediateDirectories: true)
+
+        let destination = fontsDirectory.appendingPathComponent(url.lastPathComponent)
+        if fileManager.fileExists(atPath: destination.path) {
+            try? fileManager.removeItem(at: destination)
+        }
+
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        guard (try? fileManager.copyItem(at: url, to: destination)) != nil else {
+            AppLogger.warn("Font", "字体拷贝失败：\(url.lastPathComponent)")
+            return nil
+        }
+
+        guard let font = register(fileURL: destination) else { return nil }
+        AppLogger.info("Font", "已导入字体 \(font.display) (\(font.postScript))")
+        return font
+    }
+
+    /// App 启动时重新注册（进程重启后注册会失效）
+    static func registerAll() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: fontsDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for url in files where ["ttf", "otf", "ttc"].contains(url.pathExtension.lowercased()) {
+            _ = register(fileURL: url)
+        }
+    }
+
+    private static func register(fileURL: URL) -> ImportedFont? {
+        var error: Unmanaged<CFError>?
+        _ = CTFontManagerRegisterFontsForURL(fileURL as CFURL, .process, &error)
+
+        guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(fileURL as CFURL) as? [CTFontDescriptor],
+              let descriptor = descriptors.first else {
+            return nil
+        }
+
+        let font = CTFontCreateWithFontDescriptor(descriptor, 16, nil)
+        let postScript = CTFontCopyPostScriptName(font) as String
+        let display = CTFontCopyFullName(font) as String
+
+        return ImportedFont(postScript: postScript, display: display)
     }
 }

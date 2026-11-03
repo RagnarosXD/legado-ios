@@ -22,6 +22,9 @@ struct ReadingStatisticsView: View {
                 
                 // 本周统计图表
                 weeklyChart
+
+                // 12 周热力图
+                heatmapSection
                 
                 // 排行榜
                 rankingSection
@@ -34,6 +37,67 @@ struct ReadingStatisticsView: View {
     
     // MARK: - 总览卡片
     
+    /// 12 周热力图（颜色越深读得越久）
+    private var heatmapSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("最近 12 周")
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7),
+                spacing: 3
+            ) {
+                ForEach(viewModel.heatmapDays) { day in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(heatColor(for: day.minutes))
+                        .frame(height: 16)
+                        .overlay {
+                            if Calendar.current.isDateInToday(day.date) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(Color.accentColor, lineWidth: 1.5)
+                            }
+                        }
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text("少")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                ForEach([0, 10, 30, 60], id: \.self) { value in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(heatColor(for: value))
+                        .frame(width: 12, height: 12)
+                }
+
+                Text("多")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Text("今天 \(viewModel.heatmapDays.last?.minutes ?? 0) 分钟")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+
+    private func heatColor(for minutes: Int) -> Color {
+        switch minutes {
+        case 0: return Color.secondary.opacity(0.12)
+        case 1..<10: return Color.accentColor.opacity(0.25)
+        case 10..<30: return Color.accentColor.opacity(0.45)
+        case 30..<60: return Color.accentColor.opacity(0.7)
+        default: return Color.accentColor
+        }
+    }
+
     private var overviewCard: some View {
         VStack(spacing: 16) {
             Text("累计阅读")
@@ -270,6 +334,8 @@ class ReadingStatisticsViewModel: ObservableObject {
     @Published var todayStats: DailyReadingStats?
     @Published var weeklyData: [(day: String, minutes: Int)] = []
     @Published var ranking: [RankingItem] = []
+    /// 最近 12 周的每日阅读分钟数（热力图）
+    @Published var heatmapDays: [HeatmapDay] = []
     
     private let statsManager = ReadingStatisticsManager()
     
@@ -318,6 +384,9 @@ class ReadingStatisticsViewModel: ObservableObject {
         
         // 加载排行榜
         loadRanking()
+
+        // 加载热力图
+        loadHeatmap()
     }
     
     private func loadWeeklyData() {
@@ -338,6 +407,21 @@ class ReadingStatisticsViewModel: ObservableObject {
         weeklyData = data
     }
     
+    /// 最近 12 周（84 天）的每日阅读时长
+    private func loadHeatmap() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var days: [HeatmapDay] = []
+
+        for offset in (0..<84).reversed() {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            let stats = statsManager.getStats(for: date)
+            days.append(HeatmapDay(date: date, minutes: Int((stats?.readingTime ?? 0) / 60)))
+        }
+
+        heatmapDays = days
+    }
+
     private func loadRanking() {
         let rawRanking = statsManager.getReadingRanking(limit: 10)
         
@@ -388,4 +472,13 @@ extension DateFormatter {
     NavigationView {
         ReadingStatisticsView()
     }
+}
+
+// MARK: - 热力图数据
+
+struct HeatmapDay: Identifiable {
+    let date: Date
+    let minutes: Int
+
+    var id: Date { date }
 }

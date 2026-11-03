@@ -29,6 +29,8 @@ struct WebChapter {
     var url: String = ""
     var index: Int = 0
     var isVip: Bool = false
+    /// 分卷标题（Android BookChapter.isVolume）
+    var isVolume: Bool = false
 }
 
 /// WebBook 核心操作类

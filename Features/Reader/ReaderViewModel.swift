@@ -303,6 +303,7 @@ class ReaderViewModel: ObservableObject {
                 chapter.book = book
                 chapter.sourceId = source.sourceId.uuidString
                 chapter.isVIP = web.isVip
+                chapter.isVolume = web.isVolume
             }
 
             book.totalChapterNum = Int32(webChapters.count)

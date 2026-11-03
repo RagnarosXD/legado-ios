@@ -262,9 +262,35 @@ struct SourcePickerView: View {
     @Environment(\.dismiss) var dismiss
     @State private var sources: [BookSource] = []
     
+    /// 书源分组（用于按分组快速勾选，对齐 Android SearchScope 的分组范围）
+    private var groups: [String] {
+        Array(Set(sources.compactMap { $0.bookSourceGroup }.filter { !$0.isEmpty })).sorted()
+    }
+
     var body: some View {
         NavigationView {
             List {
+                if !groups.isEmpty {
+                    Section("按分组快速选择") {
+                        ForEach(groups, id: \.self) { group in
+                            Button {
+                                toggleGroup(group)
+                            } label: {
+                                HStack {
+                                    Text(group)
+                                        .foregroundColor(.primary)
+
+                                    Spacer()
+
+                                    Text("\(groupSourceCount(group))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 ForEach(sources, id: \.sourceId) { source in
                     HStack {
                         Text(source.displayName)
@@ -327,6 +353,31 @@ struct SourcePickerView: View {
             selectedSources.remove(at: index)
         } else {
             selectedSources.append(source)
+        }
+    }
+
+    private func groupSourceCount(_ group: String) -> Int {
+        sources.filter { ($0.bookSourceGroup ?? "") == group && $0.supportsTextSearch }.count
+    }
+
+    /// 整组选中 / 整组取消（全选状态下再点即取消）
+    private func toggleGroup(_ group: String) {
+        let groupSources = sources.filter {
+            ($0.bookSourceGroup ?? "") == group && $0.supportsTextSearch
+        }
+        guard !groupSources.isEmpty else { return }
+
+        let allSelected = groupSources.allSatisfy { candidate in
+            selectedSources.contains { $0.sourceId == candidate.sourceId }
+        }
+
+        if allSelected {
+            let ids = Set(groupSources.map { $0.sourceId })
+            selectedSources.removeAll { ids.contains($0.sourceId) }
+        } else {
+            for source in groupSources where !selectedSources.contains(where: { $0.sourceId == source.sourceId }) {
+                selectedSources.append(source)
+            }
         }
     }
 }

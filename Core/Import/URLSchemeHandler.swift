@@ -167,10 +167,10 @@ struct URLSchemeHandler {
             source.jsLib = raw["jsLib"] as? String
             // ruleReview 可能是对象，统一转成 JSON 字符串保存
             if let review = raw["ruleReview"] as? String {
-                source.ruleReview = review
+                source.ruleReviewData = review.data(using: .utf8)
             } else if let review = raw["ruleReview"],
                       let data = try? JSONSerialization.data(withJSONObject: review, options: [.prettyPrinted, .sortedKeys]) {
-                source.ruleReview = String(data: data, encoding: .utf8)
+                source.ruleReviewData = data
             }
             source.bookUrlPattern = raw["bookUrlPattern"] as? String
             source.enabled = raw["enabled"] as? Bool ?? true

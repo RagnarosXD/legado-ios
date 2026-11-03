@@ -33,7 +33,7 @@ class SourceEditViewModel: ObservableObject {
             self.bookInfoRule = source.getBookInfoRule() ?? BookSource.BookInfoRule()
             self.tocRule = source.getTocRule() ?? BookSource.TocRule()
             self.contentRule = source.getContentRule() ?? BookSource.ContentRule()
-            self.reviewRule = source.ruleReview ?? ""
+            self.reviewRule = source.ruleReviewData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         } else {
             self.searchRule = BookSource.SearchRule()
             self.exploreRule = BookSource.ExploreRule()
@@ -57,9 +57,8 @@ class SourceEditViewModel: ObservableObject {
         do {
             try validateHeaderJSON(source.header)
 
-            source.ruleReview = reviewRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? nil
-                : reviewRule
+            let trimmedReview = reviewRule.trimmingCharacters(in: .whitespacesAndNewlines)
+            source.ruleReviewData = trimmedReview.isEmpty ? nil : trimmedReview.data(using: .utf8)
 
             let target = persistedSource ?? BookSource.create(in: context)
             Self.copyEditableFields(from: source, to: target)
@@ -181,7 +180,7 @@ class SourceEditViewModel: ObservableObject {
         target.searchUrl = normalizeOptional(source.searchUrl)
         target.exploreUrl = normalizeOptional(source.exploreUrl)
         target.exploreScreen = normalizeOptional(source.exploreScreen)
-        target.ruleReview = normalizeOptional(source.ruleReview)
+        target.ruleReviewData = source.ruleReviewData
     }
 
     private static func normalizeOptional(_ value: String?) -> String? {

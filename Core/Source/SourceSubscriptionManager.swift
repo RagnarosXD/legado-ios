@@ -340,7 +340,7 @@ struct ExportableSource: Codable {
         self.customOrder = Int(source.customOrder)
         self.respondTime = Int(source.respondTime)
         self.lastUpdateTime = Int(source.lastUpdateTime)
-        self.ruleReview = source.ruleReview
+        self.ruleReview = source.ruleReviewData.flatMap { String(data: $0, encoding: .utf8) }
         
         self.ruleSearch = try? source.ruleSearchData.flatMap { try JSONDecoder().decode(BookSource.SearchRule.self, from: $0) }
         self.ruleExplore = try? source.ruleExploreData.flatMap { try JSONDecoder().decode(BookSource.ExploreRule.self, from: $0) }

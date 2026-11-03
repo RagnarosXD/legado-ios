@@ -20,12 +20,19 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
+            // 发现（对齐 Android 的发现页）
+            NavigationStack { ExploreView() }
+                .tabItem {
+                    Image(systemName: "safari.fill")
+                }
+                .tag(1)
+
             // 我的
             SettingsView()
                 .tabItem {
                     Image(systemName: "person.crop.circle")
                 }
-                .tag(1)
+                .tag(2)
         }
         .accentColor(.blue)
     }
@@ -750,4 +757,419 @@ struct SourceSubscriptionView: View {
 
 #Preview {
     MainTabView()
+}
+
+// ===== 发现页（对齐 Android ExploreFragment / ExploreShowActivity）=====
+//
+//  ExploreView.swift
+//  Legado-iOS
+//
+//  发现页 — 对齐 Android ExploreFragment / ExploreShowActivity
+//
+
+import SwiftUI
+import CoreData
+
+// MARK: - 发现首页（书源列表）
+
+struct ExploreView: View {
+
+    @StateObject private var viewModel = ExploreViewModel()
+    @State private var keyword = ""
+    @State private var selectedKind: ExploreKindSelection?
+
+    var body: some View {
+        List {
+            if viewModel.sources.isEmpty {
+                EmptyStateView(
+                    title: "没有可用的发现页",
+                    subtitle: "在书源管理中检查「有发现」的书源",
+                    imageName: "safari"
+                )
+            } else {
+                ForEach(viewModel.sources, id: \.sourceId) { source in
+                    ExploreSourceRow(source: source) { kind in
+                        selectedKind = ExploreKindSelection(source: source, kind: kind)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("发现")
+        .searchable(text: $keyword, prompt: "搜索书源或分类")
+        .onChange(of: keyword) { value in
+            viewModel.filter = value
+        }
+        .task {
+            viewModel.loadSources()
+        }
+        .sheet(item: $selectedKind) { selection in
+            NavigationView {
+                ExploreListView(source: selection.source, kind: selection.kind)
+            }
+        }
+    }
+}
+
+// MARK: - 分类选择
+
+struct ExploreKindSelection: Identifiable {
+    let source: BookSource
+    let kind: BookSource.ExploreKindItem
+
+    var id: String { "\(source.sourceId.uuidString)-\(kind.name)" }
+}
+
+// MARK: - 书源行（可展开分类 chips）
+
+private struct ExploreSourceRow: View {
+
+    let source: BookSource
+    let onSelect: (BookSource.ExploreKindItem) -> Void
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(source.bookSourceName)
+                            .font(.body)
+                            .foregroundColor(.primary)
+
+                        if let group = source.bookSourceGroup, !group.isEmpty {
+                            Text(group)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    Text("\(source.exploreKinds.count)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                let kinds = source.exploreKinds
+                if kinds.isEmpty {
+                    Text("该源的 exploreUrl 需要 JS 生成，暂不支持")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                } else {
+                    FlowLayout(spacing: 6) {
+                        ForEach(kinds) { kind in
+                            Button {
+                                onSelect(kind)
+                            } label: {
+                                Text(kind.name)
+                                    .font(.caption)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(Color(.secondarySystemBackground)))
+                                    .foregroundColor(.primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - 分类内容页
+
+struct ExploreListView: View {
+
+    let source: BookSource
+    let kind: BookSource.ExploreKindItem
+
+    @StateObject private var viewModel = ExploreListViewModel()
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(viewModel.results, id: \.bookUrl) { result in
+                Button {
+                    Task { await viewModel.addToShelf(result: result) }
+                } label: {
+                    ExploreResultRow(result: result)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if viewModel.isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else if viewModel.hasMore {
+                Button("加载下一页") {
+                    Task { await viewModel.loadMore() }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle(kind.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("关闭") { dismiss() }
+            }
+        }
+        .task {
+            await viewModel.load(source: source, ruleUrl: kind.url)
+        }
+        .alert("提示", isPresented: $viewModel.showingAlert) {
+            Button("好的") { }
+        } message: {
+            Text(viewModel.alertMessage)
+        }
+    }
+}
+
+// MARK: - 结果行
+
+private struct ExploreResultRow: View {
+
+    let result: SearchBookResult
+
+    var body: some View {
+        HStack(spacing: 10) {
+            BookCoverView(url: result.coverUrl)
+                .frame(width: 48, height: 64)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(4)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(result.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+
+                if !result.author.isEmpty {
+                    Text(result.author)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let last = result.lastChapter, !last.isEmpty {
+                    Text(last)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - 简易流式布局（分类 chips 换行）
+
+struct FlowLayout: Layout {
+
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentWidth: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentWidth + size.width > maxWidth, currentWidth > 0 {
+                totalHeight += rowHeight + spacing
+                currentWidth = 0
+                rowHeight = 0
+            }
+            currentWidth += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        totalHeight += rowHeight
+        return CGSize(width: maxWidth.isFinite ? maxWidth : currentWidth, height: max(totalHeight, 0))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+//
+//  ExploreViewModel.swift
+//  Legado-iOS
+//
+//  发现页数据层
+//
+
+import Foundation
+import CoreData
+
+// MARK: - 发现首页
+
+@MainActor
+final class ExploreViewModel: ObservableObject {
+
+    @Published var sources: [BookSource] = []
+    @Published var filter: String = ""
+
+    private var allSources: [BookSource] = []
+
+    func loadSources() {
+        let request: NSFetchRequest<BookSource> = BookSource.fetchRequest()
+        request.predicate = NSPredicate(format: "enabled == YES")
+        request.sortDescriptors = [NSSortDescriptor(key: "customOrder", ascending: true)]
+
+        let fetched = (try? CoreDataStack.shared.viewContext.fetch(request)) ?? []
+        allSources = fetched.filter { !$0.exploreKinds.isEmpty }
+        applyFilter()
+    }
+
+    private func applyFilter() {
+        let keyword = filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !keyword.isEmpty else {
+            sources = allSources
+            return
+        }
+
+        sources = allSources.filter { source in
+            if source.bookSourceName.lowercased().contains(keyword) { return true }
+            if (source.bookSourceGroup ?? "").lowercased().contains(keyword) { return true }
+            return source.exploreKinds.contains { $0.name.lowercased().contains(keyword) }
+        }
+    }
+}
+
+// MARK: - 分类内容页
+
+@MainActor
+final class ExploreListViewModel: ObservableObject {
+
+    @Published var results: [SearchBookResult] = []
+    @Published var isLoading = false
+    @Published var hasMore = true
+    @Published var showingAlert = false
+    @Published var alertMessage = ""
+
+    private var source: BookSource?
+    private var ruleUrl: String = ""
+    private var page = 1
+    private var loaded = Set<String>()
+
+    func load(source: BookSource, ruleUrl: String) async {
+        self.source = source
+        self.ruleUrl = ruleUrl
+        page = 1
+        results = []
+        loaded = []
+        hasMore = true
+        await fetch()
+    }
+
+    func loadMore() async {
+        guard hasMore, !isLoading else { return }
+        page += 1
+        await fetch()
+    }
+
+    private func fetch() async {
+        guard let source, !ruleUrl.isEmpty else { return }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let books = try await WebBook.exploreBook(source: source, ruleUrl: ruleUrl, page: page)
+
+            var added = 0
+            for book in books where !book.bookUrl.isEmpty {
+                if loaded.insert(book.bookUrl).inserted {
+                    results.append(book)
+                    added += 1
+                }
+            }
+
+            // 与 Android 一致：新一页没有新增条目则视为没有更多
+            hasMore = added > 0
+            AppLogger.info("Explore", "分类 \(ruleUrl.prefix(60)) page=\(page) 新增=\(added) 累计=\(results.count)")
+        } catch {
+            hasMore = false
+            alertMessage = "加载失败：\(error.localizedDescription)"
+            showingAlert = true
+        }
+    }
+
+    /// 加入书架（复用搜索的入库规则：按 bookUrl 去重）
+    func addToShelf(result: SearchBookResult) async {
+        let context = CoreDataStack.shared.viewContext
+
+        let request: NSFetchRequest<Book> = Book.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "bookUrl == %@", result.bookUrl)
+
+        if let existing = try? context.fetch(request).first {
+            existing.name = result.name
+            existing.author = result.author
+            existing.coverUrl = result.coverUrl
+            existing.intro = result.intro
+            existing.originName = result.sourceName
+            existing.updatedAt = Date()
+            try? CoreDataStack.shared.save()
+            alertMessage = "《\(existing.name)》已在书架"
+            showingAlert = true
+            return
+        }
+
+        guard let source else { return }
+
+        let book = Book.create(in: context)
+        book.name = result.name
+        book.author = result.author
+        book.coverUrl = result.coverUrl
+        book.intro = result.intro
+        book.bookUrl = result.bookUrl
+        book.tocUrl = ""
+        book.origin = source.sourceId.uuidString
+        book.originName = source.bookSourceName
+        book.source = source
+        try? context.save()
+
+        alertMessage = "已加入书架"
+        showingAlert = true
+    }
 }

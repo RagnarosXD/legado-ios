@@ -325,3 +325,50 @@ extension BookSource {
         return parts.joined(separator: "\n")
     }
 }
+
+// MARK: - 发现分类（对齐 Android BookSource.exploreKinds）
+
+extension BookSource {
+
+    struct ExploreKindItem: Identifiable, Hashable {
+        let name: String
+        let url: String
+
+        var id: String { "\(name)|\(url)" }
+    }
+
+    /// 解析 exploreUrl：`名称::地址` 用 `&&` 或换行分隔；
+    /// `@js:` / `<js>` 形式需要 JS 引擎，暂返回空
+    var exploreKinds: [ExploreKindItem] {
+        guard let raw = exploreUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return []
+        }
+
+        let lowered = raw.lowercased()
+        if lowered.hasPrefix("@js:") || lowered.contains("<js>") {
+            return []
+        }
+
+        var items: [ExploreKindItem] = []
+
+        for line in raw.components(separatedBy: "\n") {
+            for part in line.components(separatedBy: "&&") {
+                let text = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+
+                let comps = text.components(separatedBy: "::")
+                if comps.count >= 2 {
+                    let name = comps[0].trimmingCharacters(in: .whitespaces)
+                    let url = comps.dropFirst().joined(separator: "::").trimmingCharacters(in: .whitespaces)
+                    if !url.isEmpty {
+                        items.append(ExploreKindItem(name: name.isEmpty ? "发现" : name, url: url))
+                    }
+                } else if text.contains("http") {
+                    items.append(ExploreKindItem(name: "发现", url: text))
+                }
+            }
+        }
+
+        return items
+    }
+}

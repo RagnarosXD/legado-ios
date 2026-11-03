@@ -145,6 +145,41 @@ class WebBook {
         return parsed
     }
     
+    // MARK: - 发现页
+
+    /// 发现页列表（对齐 Android WebBook.exploreBook）
+    static func exploreBook(
+        source: BookSource,
+        ruleUrl: String,
+        page: Int = 1
+    ) async throws -> [SearchBookResult] {
+        let analyzedUrl = AnalyzeUrl.analyze(
+            ruleUrl: ruleUrl,
+            page: page,
+            baseUrl: source.bookSourceUrl,
+            source: source
+        )
+        AppLogger.debug("Explore", "\(source.bookSourceName) page=\(page) url=\(analyzedUrl.url.prefix(180))")
+
+        let (body, redirectUrl) = try await AnalyzeUrl.getResponseBody(analyzedUrl: analyzedUrl)
+        guard !body.isEmpty else { throw WebBookError.emptyResponse }
+
+        let rule = source.getExploreRule()
+        return try parseBookList(
+            source: source,
+            body: body,
+            baseUrl: redirectUrl,
+            bookListRule: rule?.exploreList,
+            nameRule: rule?.name,
+            authorRule: rule?.author,
+            bookUrlRule: rule?.bookUrl,
+            coverUrlRule: rule?.coverUrl,
+            introRule: rule?.intro,
+            lastChapterRule: rule?.lastChapter,
+            wordCountRule: rule?.wordCount
+        )
+    }
+
     // MARK: - 获取书籍详情
     
     /// 获取书籍详细信息

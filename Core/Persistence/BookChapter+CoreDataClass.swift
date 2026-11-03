@@ -28,6 +28,9 @@ public class BookChapter: NSManagedObject {
     @NSManaged public var updateTime: Int64
     
     // MARK: - 缓存
+    /// 是否分卷标题（对齐 Android BookChapter.isVolume）
+    @NSManaged public var isVolume: Bool
+
     @NSManaged public var isCached: Bool
     @NSManaged public var cachePath: String?
     @NSManaged public var contentHash: String?

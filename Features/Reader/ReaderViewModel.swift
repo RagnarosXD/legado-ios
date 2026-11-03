@@ -830,30 +830,46 @@ struct ChapterListView: View {
             ScrollViewReader { proxy in
                 List {
                     ForEach(orderedChapters, id: \.chapter.chapterId) { item in
-                        Button(action: {
-                            viewModel.jumpToChapter(item.index)
-                            dismiss()
-                        }) {
+                        if item.chapter.isVolume {
+                            // 分卷标题行（对齐 Android 的卷头，不可点击跳转）
                             HStack {
-                                Text("\(item.index + 1)")
-                                    .font(.caption)
+                                Image(systemName: "book.closed")
+                                    .font(.caption2)
                                     .foregroundColor(.secondary)
-                                    .frame(width: 40, alignment: .leading)
 
                                 Text(item.chapter.title)
-                                    .font(item.index == viewModel.currentChapterIndex ? .body.weight(.semibold) : .body)
-                                    .foregroundColor(item.index == viewModel.currentChapterIndex ? .accentColor : .primary)
-                                    .lineLimit(2)
+                                    .font(.subheadline.weight(.semibold))
 
                                 Spacer()
-
-                                if item.chapter.isCached {
-                                    Image(systemName: "arrow.down.circle.fill")
-                                        .foregroundColor(.green)
-                                        .font(.caption)
-                                }
                             }
+                            .padding(.vertical, 2)
                             .id(item.chapter.chapterId)
+                        } else {
+                            Button(action: {
+                                viewModel.jumpToChapter(item.index)
+                                dismiss()
+                            }) {
+                                HStack {
+                                    Text("\(item.index + 1)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 40, alignment: .leading)
+
+                                    Text(item.chapter.title)
+                                        .font(item.index == viewModel.currentChapterIndex ? .body.weight(.semibold) : .body)
+                                        .foregroundColor(item.index == viewModel.currentChapterIndex ? .accentColor : .primary)
+                                        .lineLimit(2)
+
+                                    Spacer()
+
+                                    if item.chapter.isCached {
+                                        Image(systemName: "arrow.down.circle.fill")
+                                            .foregroundColor(.green)
+                                            .font(.caption)
+                                    }
+                                }
+                                .id(item.chapter.chapterId)
+                            }
                         }
                     }
                 }

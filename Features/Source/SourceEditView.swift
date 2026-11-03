@@ -1,8 +1,16 @@
 import SwiftUI
+import UIKit
 
 struct SourceEditView: View {
     @ObservedObject var viewModel: SourceEditViewModel
     @Environment(\.dismiss) var dismiss
+
+    /// 把当前编辑内容序列化为 JSON 并复制（对齐 Android 编辑页的「复制」）
+    private func copyJSONToPasteboard() {
+        let json = viewModel.exportJSON()
+        guard !json.isEmpty else { return }
+        UIPasteboard.general.string = json
+    }
 
     var body: some View {
         NavigationView {
@@ -24,8 +32,19 @@ struct SourceEditView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
-                        viewModel.save()
+                    Menu {
+                        Button("保存") {
+                            viewModel.save()
+                        }
+
+                        // 对齐 Android 编辑页的「复制」：把当前编辑内容序列化成 JSON
+                        Button {
+                            copyJSONToPasteboard()
+                        } label: {
+                            Label("复制书源 JSON", systemImage: "doc.on.doc")
+                        }
+                    } label: {
+                        Text("保存")
                     }
                 }
             }

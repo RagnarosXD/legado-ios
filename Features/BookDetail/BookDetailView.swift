@@ -228,11 +228,19 @@ struct BookDetailView: View {
     // MARK: - 简介
     private var introductionSection: some View {
         SectionCard(title: "简介") {
-            Text(book.displayIntro ?? "")
-                .font(.body)
-                .lineSpacing(4)
-                .lineLimit(viewModel.isIntroExpanded ? nil : 4)
-            
+            // 对齐 Android BookInfoActivity：<usehtml> 富文本 / <md> Markdown / 纯文本
+            if let attributed = BookIntroRenderer.render(book.displayIntro ?? "") {
+                Text(attributed)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(viewModel.isIntroExpanded ? nil : 4)
+            } else {
+                Text(book.displayIntro ?? "")
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(viewModel.isIntroExpanded ? nil : 4)
+            }
+
             if (book.displayIntro ?? "").count > 100 {
                 Button(action: { viewModel.isIntroExpanded.toggle() }) {
                     Text(viewModel.isIntroExpanded ? "收起" : "展开")
@@ -768,5 +776,58 @@ struct SourceSelectionSheet: View {
 #Preview {
     NavigationView {
         BookDetailView(book: Book())
+    }
+}
+
+// MARK: - 简介富文本（对齐 Android BookInfoActivity 的 usehtml / md）
+
+enum BookIntroRenderer {
+
+    static func render(_ raw: String) -> AttributedString? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+
+        if text.contains("<usehtml>") {
+            let html = text
+                .replacingOccurrences(of: "<usehtml>", with: "")
+                .replacingOccurrences(of: "</usehtml>", with: "")
+            return attributedHTML(html)
+        }
+
+        if text.contains("<md>") {
+            let md = text
+                .replacingOccurrences(of: "<md>", with: "")
+                .replacingOccurrences(of: "</md>", with: "")
+            if let attributed = try? AttributedString(
+                markdown: md,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            ) {
+                return attributed
+            }
+        }
+
+        // 纯 HTML 片段（<p> / <br>）也走富文本，避免把标签当正文显示
+        if text.range(of: "<\\s*/?\\s*[a-zA-Z][^>]*>", options: .regularExpression) != nil {
+            return attributedHTML(text)
+        }
+
+        return nil
+    }
+
+    private static func attributedHTML(_ html: String) -> AttributedString? {
+        guard let data = html.data(using: .utf8) else { return nil }
+        guard let ns = try? NSAttributedString(
+            data: data,
+            options: [
+                .documentType: NSAttributedString.DocumentType.html,
+                .characterEncoding: String.Encoding.utf8.rawValue
+            ],
+            documentAttributes: nil
+        ), ns.length > 0 else {
+            return nil
+        }
+        return AttributedString(ns)
     }
 }

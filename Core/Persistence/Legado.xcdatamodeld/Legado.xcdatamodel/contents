@@ -89,6 +89,7 @@
         <attribute name="wordCount" optional="NO" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="updateTime" optional="NO" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="isCached" optional="NO" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+  <attribute name="isVolume" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="cachePath" optional="YES" attributeType="String"/>
         <attribute name="contentHash" optional="YES" attributeType="String"/>
         <attribute name="sourceId" optional="YES" attributeType="String"/>

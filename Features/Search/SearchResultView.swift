@@ -325,6 +325,18 @@ struct SourcePickerView: View {
             }
             .navigationTitle("选择书源")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Button("全部文本源") {
+                            selectedSources = sources.filter { $0.supportsTextSearch }
+                        }
+                        Button("清空选择") {
+                            selectedSources.removeAll()
+                        }
+                    } label: {
+                        Label("范围", systemImage: "scope")
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
                         dismiss()

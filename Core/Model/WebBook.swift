@@ -326,6 +326,12 @@ class WebBook {
                 chapter.isVip = vipStr == "true" || vipStr == "1"
             }
 
+            // 分卷（Android BookChapter.isVolume）
+            if let volumeRule = tocRule.isVolume, !volumeRule.isEmpty {
+                let volumeStr = ruleEngine.getString(ruleStr: volumeRule, elementContext: elementCtx)
+                chapter.isVolume = volumeStr == "true" || volumeStr == "1"
+            }
+
             // 对齐 Android BookChapterList：只要求标题非空；链接为空时回落 baseUrl
             guard !title.isEmpty else { continue }
 

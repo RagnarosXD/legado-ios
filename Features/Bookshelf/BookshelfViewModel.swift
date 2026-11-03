@@ -210,7 +210,7 @@ final class BookshelfViewModel: ObservableObject {
     }
     
     /// 批量删除（对齐 Android 批量管理的删除）
-    func deleteBooks(ids: Set<String>) {
+    func deleteBooks(ids: Set<UUID>) {
         guard !ids.isEmpty else { return }
         let context = CoreDataStack.shared.viewContext
 
@@ -223,7 +223,7 @@ final class BookshelfViewModel: ObservableObject {
     }
 
     /// 批量加入分组（Android add_to_group：位掩码 OR）
-    func addBooks(ids: Set<String>, toGroup groupId: Int64) {
+    func addBooks(ids: Set<UUID>, toGroup groupId: Int64) {
         guard !ids.isEmpty else { return }
         let context = CoreDataStack.shared.viewContext
 

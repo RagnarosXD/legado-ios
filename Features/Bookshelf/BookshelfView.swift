@@ -19,7 +19,7 @@ struct BookshelfView: View {
     @State private var changeSourceBook: Book?
     /// 批量管理（对齐 Android BookshelfManageActivity）
     @State private var isSelecting = false
-    @State private var selectedBookIds: Set<String> = []
+    @State private var selectedBookIds: Set<UUID> = []
     @State private var showingGroupPicker = false
     
     var body: some View {

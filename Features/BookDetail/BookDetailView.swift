@@ -96,8 +96,17 @@ struct BookDetailView: View {
         .sheet(isPresented: $showingChapterList) {
             ChapterListView(viewModel: ReaderViewModel(), book: book)
         }
+        // 换源复用阅读器同一套流程：候选来自命中缓存/重新搜索，
+        // 切换时迁移 bookUrl、清空旧章节、重拉目录（对齐 Android changeSource）
         .sheet(isPresented: $showingSourceSelection) {
-            SourceSelectionSheet(book: book, selectedSource: $viewModel.currentSource)
+            ChangeSourceSheet(
+                isPresented: $showingSourceSelection,
+                book: book
+            ) {
+                Task {
+                    await viewModel.refreshBookInfo()
+                }
+            }
         }
         .navigationDestination(isPresented: $navigatingToReader) {
             ReaderView(book: book)
@@ -186,9 +195,9 @@ struct BookDetailView: View {
         }
     }
     
-    // MARK: - 操作按钮
+    // MARK: - 操作按钮（对齐 Android：开始阅读 / 加入书架 / 目录）
     private var actionButtons: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             Button(action: {
                 if viewModel.startReading() {
                     navigatingToReader = true
@@ -198,7 +207,16 @@ struct BookDetailView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            
+
+            Button(action: { viewModel.toggleFavorite() }) {
+                Label(
+                    viewModel.isFavorite ? "已在书架" : "加入书架",
+                    systemImage: viewModel.isFavorite ? "books.vertical.fill" : "books.vertical"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
             Button(action: { showingChapterList = true }) {
                 Label("目录", systemImage: "list.bullet")
                     .frame(maxWidth: .infinity)

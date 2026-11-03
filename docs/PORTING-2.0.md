@@ -197,3 +197,20 @@
 8. `AnalyzeByJSoup` 的 `tag.div.-1` 旧式点号索引与 `[]` 混写场景未覆盖
 
 缺失 1 项：`AnalyzeUrl` 的 `type`（直接读响应字节）未实现。
+## 十一、P2：阅读器（批 1-6 已完成）
+
+| 批次 | 内容 | Android 依据 |
+| --- | --- | --- |
+| 批 1 | 排版模型：行高 = 字体行高 × (1 + lineSpacingExtra/10)、段距 = 行高 × paragraphSpacing/10、首行缩进 = 实测全角空格宽 × 2、字距 = letterSpacing(em) × 字号；默认字号 20、边距 6/16/6/16、两端对齐、正文色 #3E3D3B | `ReadBookConfig.kt:907-989`、`ChapterProvider.kt:304-329`、`TextChapterLayout.kt:1120-1357` |
+| 批 2 | 点击区九宫格（X/Y 各三等分，左列上一页、正中菜单、其余下一页），覆盖/滑动/无动画三模式统一，首页末页自动跨章 | `ReadView.kt:244-254`、`811-844`、`AppConfig.kt:54-62` |
+| 批 3 | 底栏顺序：目录 · 朗读 · 界面 · 自动 · 换源 · 缓存；顶栏更多菜单（书签/换源/缓存全书/进度模式） | `ReadMenu.kt:587-621` |
+| 批 4 | 主题三套色值（日 #EEEEEE/#3E3D3B、夜 #000000/#ADADAD、水墨 #FFFFFF/#000000）、亮度条、进度条按章/按页切换 | `ReadBookConfig.kt:909-921`、`ReadMenu.kt:506-555` |
+| 批 5 | 分页移出主线程（后台 Task.detached + 竞态令牌），长章节不再卡界面 | `TextChapterLayout.kt:191-278`（IO 协程产出页） |
+| 批 6 | 目录改全屏、章节标题（居左/居中/隐藏 + 字号增量）、设置面板补齐字距/段距/缩进/两端对齐 | `ReadBookActivity.kt:1848-1852`、`ReadBookConfig.kt:936-940` |
+
+### P2 遗留（不阻塞 P3）
+
+- 页眉页脚自定义模板（Android `header`/`footer` 支持 `{{page}}` 变量）
+- 分页仍是「整章后台分页 + 首屏等待」，未做 Android 的逐页流式产出（`Channel<TextPage>`）
+- 仿真翻页动画为自绘近似，非 Android 的贝塞尔仿真实现
+- 书签面板条目结构未逐条对照

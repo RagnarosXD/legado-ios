@@ -14,7 +14,7 @@ import UIKit
 
 /// 排版参数，字段与 Android ReadBookConfig.Config 一一对应
 /// 参见 `ReadBookConfig.kt:907-989`、`ChapterProvider.kt:304-329`、`TextChapterLayout.kt:1120-1357`
-struct PageConfig {
+struct PageConfig: @unchecked Sendable {
     /// 正文字号（Android textSize，默认 20sp）
     var fontSize: CGFloat = 20
     /// Android lineSpacingExtra：整数，除以 10 得到「行高倍数增量」（默认 12 → 行高 1.2 倍）
@@ -291,7 +291,7 @@ final class PageSplitter {
 
 // MARK: - 分页缓存
 
-final class PageSplitCache {
+final class PageSplitCache: @unchecked Sendable {
     static let shared = PageSplitCache()
     
     private struct CacheKey: Hashable {

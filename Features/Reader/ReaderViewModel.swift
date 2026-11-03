@@ -204,17 +204,17 @@ class ReaderViewModel: ObservableObject {
         
         var backgroundColor: Color {
             switch self {
-            case .light: return Color.white
+            case .light: return Color(red: 0xEE / 255, green: 0xEE / 255, blue: 0xEE / 255)
             case .dark: return Color.black
             case .sepia: return Color(red: 0.96, green: 0.91, blue: 0.83)
-            case .eyeProtection: return Color(red: 0.75, green: 0.84, blue: 0.71)
+            case .eyeProtection: return Color.white
             }
         }
         
         var textColor: Color {
             switch self {
-            case .light: return Color.black
-            case .dark: return Color.white
+            case .light: return Color(red: 0x3E / 255, green: 0x3D / 255, blue: 0x3B / 255)
+            case .dark: return Color(red: 0xAD / 255, green: 0xAD / 255, blue: 0xAD / 255)
             case .sepia: return Color(red: 0.33, green: 0.28, blue: 0.22)
             case .eyeProtection: return Color.black
             }

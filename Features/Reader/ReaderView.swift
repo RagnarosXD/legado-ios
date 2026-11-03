@@ -17,6 +17,10 @@ struct ReaderView: View {
     
     @State private var showingSettings = false
     @State private var showingChapterList = false
+    /// 阅读亮度（对齐 Android ReadMenu 的 seekBrightness）
+    @AppStorage("readerBrightness") private var brightness: Double = 0.5
+    /// 进度条行为：chapter = 跳章节（默认），page = 章内翻页
+    @AppStorage("readProgressMode") private var progressMode: String = "chapter"
     @State private var showingTTSControls = false
     @State private var showingAutoPageTurn = false
     @State private var showingChangeSource = false
@@ -90,6 +94,15 @@ struct ReaderView: View {
                             } label: {
                                 Label("缓存全书", systemImage: "arrow.down.circle")
                             }
+
+                            Button {
+                                progressMode = progressMode == "page" ? "chapter" : "page"
+                            } label: {
+                                Label(
+                                    progressMode == "page" ? "进度条：按页" : "进度条：按章",
+                                    systemImage: "slider.horizontal.3"
+                                )
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.subheadline)
@@ -126,6 +139,25 @@ struct ReaderView: View {
                             .padding(.top, 4)
                         }
 
+                        // 亮度（Android 底栏左侧 seekBrightness）
+                        HStack(spacing: 8) {
+                            Image(systemName: "sun.min")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            Slider(value: $brightness, in: 0.05...1.0)
+                                .controlSize(.mini)
+                                .onChange(of: brightness) { value in
+                                    UIScreen.main.brightness = CGFloat(value)
+                                }
+
+                            Image(systemName: "sun.max")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 2)
+
                         // 章节进度：一行（上一章 + 滑块 + 下一章 + 序号）
                         HStack(spacing: 8) {
                             Button(action: { Task { await viewModel.prevChapter() } }) {
@@ -136,11 +168,19 @@ struct ReaderView: View {
                             .disabled(viewModel.currentChapterIndex <= 0)
                             .opacity(viewModel.currentChapterIndex <= 0 ? 0.35 : 1)
 
-                            Slider(value: Binding(
-                                get: { Double(viewModel.currentChapterIndex) },
-                                set: { viewModel.jumpToChapter(Int($0)) }
-                            ), in: 0...Double(max(1, viewModel.totalChapters - 1)), step: 1)
-                            .controlSize(.mini)
+                            if progressMode == "page" {
+                                Slider(value: Binding(
+                                    get: { Double(viewModel.currentPageIndex) },
+                                    set: { viewModel.currentPageIndex = Int($0) }
+                                ), in: 0...Double(max(1, viewModel.totalPages - 1)), step: 1)
+                                .controlSize(.mini)
+                            } else {
+                                Slider(value: Binding(
+                                    get: { Double(viewModel.currentChapterIndex) },
+                                    set: { viewModel.jumpToChapter(Int($0)) }
+                                ), in: 0...Double(max(1, viewModel.totalChapters - 1)), step: 1)
+                                .controlSize(.mini)
+                            }
 
                             Button(action: { Task { await viewModel.nextChapter() } }) {
                                 Image(systemName: "chevron.right")
@@ -150,7 +190,9 @@ struct ReaderView: View {
                             .disabled(viewModel.currentChapterIndex >= viewModel.totalChapters - 1)
                             .opacity(viewModel.currentChapterIndex >= viewModel.totalChapters - 1 ? 0.35 : 1)
 
-                            Text("\(viewModel.currentChapterIndex + 1)/\(viewModel.totalChapters)")
+                            Text(progressMode == "page"
+                                 ? "\(viewModel.currentPageIndex + 1)/\(max(1, viewModel.totalPages))"
+                                 : "\(viewModel.currentChapterIndex + 1)/\(viewModel.totalChapters)")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .monospacedDigit()
@@ -255,7 +297,8 @@ struct ReaderView: View {
             } message: {
                 Text("阅读一段时间了，休息一下眼睛。")
             }
-            .sheet(isPresented: $showingChapterList) {
+            // 对齐 Android：目录是独立全屏页面（TocActivity），不是半屏弹层
+            .fullScreenCover(isPresented: $showingChapterList) {
                 ChapterListView(viewModel: viewModel, book: book)
             }
             .sheet(isPresented: $showingChangeSource) {

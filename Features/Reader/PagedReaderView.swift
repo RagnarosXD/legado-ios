@@ -17,6 +17,8 @@ struct PagedReaderView: View {
     
     @State private var pages: [String] = []
     @State private var containerSize: CGSize = .zero
+    /// 分页竞态令牌：连续切章时只让最后一次结果生效
+    @StateObject private var splitCoordinator = SplitCoordinator()
 
     private var currentPageBinding: Binding<Int> {
         Binding(
@@ -190,25 +192,35 @@ struct PagedReaderView: View {
             pages = []
             return
         }
-        
+
         guard containerSize.width > 0, containerSize.height > 0 else { return }
-        
+
         let config = viewModel.makePageConfig(
             containerSize: containerSize,
             extraTop: extraInsets.top,
             extraBottom: extraInsets.bottom
         )
-        
-        // 使用缓存分页
-        let result = PageSplitCache.shared.getOrSplit(text: content, config: config)
-        
-        let oldPage = viewModel.currentPageIndex
-        pages = result.pages
-        viewModel.totalPages = result.totalPages
-        
-        // 保持页码在有效范围内
-        if oldPage >= pages.count {
-            viewModel.currentPageIndex = max(0, pages.count - 1)
+
+        // 对齐 Android：分页在 IO 线程增量产出（TextChapterLayout 用协程分页），
+        // 主线程只负责展示，避免长章节把界面卡住。
+        let token = splitCoordinator.begin()
+        let text = content
+
+        Task.detached(priority: .userInitiated) {
+            let result = PageSplitCache.shared.getOrSplit(text: text, config: config)
+
+            await MainActor.run {
+                guard splitCoordinator.isCurrent(token) else { return }
+
+                let oldPage = viewModel.currentPageIndex
+                pages = result.pages
+                viewModel.totalPages = result.totalPages
+
+                // 保持页码在有效范围内
+                if oldPage >= pages.count {
+                    viewModel.currentPageIndex = max(0, pages.count - 1)
+                }
+            }
         }
     }
     
@@ -314,5 +326,21 @@ enum ReaderTapZone {
         default:
             return .nextPage
         }
+    }
+}
+
+// MARK: - 分页竞态控制
+
+/// 连续切章 / 改字号时会多次触发分页，只允许最后一次的结果写回界面
+final class SplitCoordinator: ObservableObject {
+    private(set) var token = UUID()
+
+    func begin() -> UUID {
+        token = UUID()
+        return token
+    }
+
+    func isCurrent(_ candidate: UUID) -> Bool {
+        candidate == token
     }
 }

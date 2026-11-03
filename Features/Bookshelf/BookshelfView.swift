@@ -216,7 +216,6 @@ ToolbarItem(placement: .navigationBarTrailing) {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
     private func toggleBookSelection(_ book: Book) {
         if selectedBookIds.contains(book.bookId) {
             selectedBookIds.remove(book.bookId)
@@ -266,6 +265,7 @@ ToolbarItem(placement: .navigationBarTrailing) {
         .background(.bar)
     }
 
+    @ViewBuilder
     private var bookshelfContent: some View {
         switch viewModel.viewMode {
         case .grid:

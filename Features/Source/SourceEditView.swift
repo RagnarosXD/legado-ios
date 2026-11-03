@@ -21,6 +21,7 @@ struct SourceEditView: View {
                 BookInfoRuleSection(viewModel: viewModel)
                 TocRuleSection(viewModel: viewModel)
                 ContentRuleSection(viewModel: viewModel)
+                ReviewRuleSection(viewModel: viewModel)
             }
             .navigationTitle(viewModel.isNewSource ? "新书源" : "编辑书源")
             .navigationBarTitleDisplayMode(.inline)
@@ -63,6 +64,30 @@ struct SourceEditView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "未知错误")
+        }
+    }
+}
+
+// MARK: - 段评规则
+
+struct ReviewRuleSection: View {
+    @ObservedObject var viewModel: SourceEditViewModel
+
+    var body: some View {
+        Section("段评规则") {
+            TextEditor(text: $viewModel.reviewRule)
+                .font(.system(.caption, design: .monospaced))
+                .frame(minHeight: 88)
+                .overlay(alignment: .topLeading) {
+                    if viewModel.reviewRule.isEmpty {
+                        Text(#"{"reviewList":"","avatarRule":"","contentRule":""}"#)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
+                    }
+                }
         }
     }
 }

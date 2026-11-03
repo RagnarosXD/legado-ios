@@ -293,11 +293,22 @@ struct ExportableSource: Codable {
     var header: String?
     var concurrentRate: String?
     var loginUrl: String?
+    var loginUi: String?
+    var loginCheckJs: String?
+    var jsLib: String?
+    var coverDecodeJs: String?
+    var variableComment: String?
+    var bookSourceComment: String?
+    var enabledCookieJar: Bool?
     var searchUrl: String?
     var exploreUrl: String?
     var enabled: Bool?
     var enabledExplore: Bool?
     var weight: Int?
+    var customOrder: Int?
+    var respondTime: Int?
+    var lastUpdateTime: Int?
+    var ruleReview: String?
     
     var ruleSearch: BookSource.SearchRule?
     var ruleExplore: BookSource.ExploreRule?
@@ -314,11 +325,22 @@ struct ExportableSource: Codable {
         self.header = source.header
         self.concurrentRate = source.concurrentRate
         self.loginUrl = source.loginUrl
+        self.loginUi = source.loginUi
+        self.loginCheckJs = source.loginCheckJs
+        self.jsLib = source.jsLib
+        self.coverDecodeJs = source.coverDecodeJs
+        self.variableComment = source.variableComment
+        self.bookSourceComment = source.bookSourceComment
+        self.enabledCookieJar = source.enabledCookieJar
         self.searchUrl = source.searchUrl
         self.exploreUrl = source.exploreUrl
         self.enabled = source.enabled
         self.enabledExplore = source.enabledExplore
         self.weight = Int(source.weight)
+        self.customOrder = Int(source.customOrder)
+        self.respondTime = Int(source.respondTime)
+        self.lastUpdateTime = Int(source.lastUpdateTime)
+        self.ruleReview = source.ruleReview
         
         self.ruleSearch = try? source.ruleSearchData.flatMap { try JSONDecoder().decode(BookSource.SearchRule.self, from: $0) }
         self.ruleExplore = try? source.ruleExploreData.flatMap { try JSONDecoder().decode(BookSource.ExploreRule.self, from: $0) }

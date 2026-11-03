@@ -76,13 +76,13 @@ class ReaderViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(textJustified, forKey: "reader.justified") }
     }
     /// 字体族（为空用系统字体）
-    @Published var fontFamily: String? = nil
-    /// 章节标题显示方式（Android titleMode）：0 居左、1 居中、2 隐藏
-    @Published var chapterTitleMode: Int = 0 { didSet { objectWillChange.send() } }
-    /// 标题字号增量（Android titleSize）
-    @Published var chapterTitleSizeDelta: CGFloat = 0 { didSet { objectWillChange.send() } } {
+    @Published var fontFamily: String? = nil {
         didSet { UserDefaults.standard.set(fontFamily, forKey: "reader.fontFamily") }
     }
+    /// 章节标题显示方式（Android titleMode）：0 居左、1 居中、2 隐藏
+    @Published var chapterTitleMode: Int = 0
+    /// 标题字号增量（Android titleSize）
+    @Published var chapterTitleSizeDelta: CGFloat = 0
     
     // MARK: - 私有属性
     private var ruleEngine: RuleEngine = RuleEngine()

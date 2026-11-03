@@ -31,6 +31,12 @@ struct BookshelfView: View {
             }
         }
         .navigationTitle("书架")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            groupBar
+        }
+        .onChange(of: viewModel.sortBy) { _ in
+            Task { await viewModel.loadBooks() }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Picker("", selection: $viewModel.viewMode) {
@@ -46,6 +52,17 @@ ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 12) {
                     Button(action: { showingSearch = true }) {
                         Image(systemName: "magnifyingglass")
+                    }
+
+                    // 排序（对齐 Android bookshelfSort 的 6 种）
+                    Menu {
+                        Picker("排序", selection: $viewModel.sortBy) {
+                            ForEach(BookshelfViewModel.SortBy.allCases, id: \.rawValue) { sort in
+                                Label(sort.title, systemImage: sort.icon).tag(sort)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
                     }
 
                     Button(action: { showingSourceManage = true }) {
@@ -136,6 +153,45 @@ ToolbarItem(placement: .navigationBarTrailing) {
     }
     
     @ViewBuilder
+    /// 分组条（对齐 Android 风格1 的分组 Tab）
+    private var groupBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                groupChip(title: "全部", id: nil)
+
+                ForEach(viewModel.groups, id: \.groupId) { group in
+                    groupChip(title: group.groupName, id: group.groupId)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .background(.bar)
+    }
+
+    private func groupChip(title: String, id: Int64?) -> some View {
+        let active = viewModel.selectedGroupId == id
+
+        return Button {
+            viewModel.selectGroup(id)
+        } label: {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(
+                        active ? Color.accentColor.opacity(0.16) : Color(.secondarySystemBackground)
+                    )
+                )
+                .overlay(
+                    Capsule().stroke(active ? Color.accentColor : Color.clear, lineWidth: 1)
+                )
+                .foregroundColor(active ? .accentColor : .primary)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var bookshelfContent: some View {
         switch viewModel.viewMode {
         case .grid:
@@ -237,6 +293,17 @@ struct BookGridItemView: View {
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
                 .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                .overlay(alignment: .topTrailing) {
+                    if book.unreadChapterCount > 0 {
+                        Text("\(book.unreadChapterCount)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red))
+                            .padding(4)
+                    }
+                }
             
             // 书名
             Text(book.name)
@@ -251,10 +318,12 @@ struct BookGridItemView: View {
                 .lineLimit(1)
                 .foregroundColor(.secondary)
             
-            // 进度条
-            ProgressView(value: book.readProgress)
-                .progressViewStyle(.linear)
-                .tint(.blue)
+            // 进度条：Android 在「尚未开始阅读」时不显示
+            if !book.hasNotStartedReading {
+                ProgressView(value: book.readProgress)
+                    .progressViewStyle(.linear)
+                    .tint(.blue)
+            }
         }
     }
 }
@@ -284,6 +353,14 @@ struct BookListItemView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                 
+                // 当前阅读章节（Android tvRead）
+                if let reading = book.durChapterTitle, !reading.isEmpty {
+                    Text("读到：\(reading)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
                 // 最新章节
                 if let chapter = book.latestChapterTitle {
                     Text(chapter)
@@ -294,15 +371,17 @@ struct BookListItemView: View {
                 
                 Spacer()
                 
-                // 进度
-                HStack {
-                    ProgressView(value: book.readProgress)
-                        .progressViewStyle(.linear)
-                        .frame(width: 100)
-                    
-                    Text("\(Int(book.readProgress * 100))%")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                // 进度：未开始阅读时不显示
+                if !book.hasNotStartedReading {
+                    HStack {
+                        ProgressView(value: book.readProgress)
+                            .progressViewStyle(.linear)
+                            .frame(width: 100)
+
+                        Text("\(Int(book.readProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             

@@ -181,3 +181,18 @@ extension Book {
         return book
     }
 }
+
+// MARK: - 书架展示（对齐 Android BookExtensions）
+
+extension Book {
+
+    /// 未读章节数（Android `getUnreadChapterNum()`）
+    var unreadChapterCount: Int {
+        max(Int(totalChapterNum) - Int(durChapterIndex) - 1, 0)
+    }
+
+    /// 尚未开始阅读：Android 此时不显示进度条
+    var hasNotStartedReading: Bool {
+        durChapterIndex == 0 && readProgress <= 0
+    }
+}

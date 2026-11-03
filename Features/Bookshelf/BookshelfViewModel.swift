@@ -17,7 +17,9 @@ final class BookshelfViewModel: ObservableObject {
     @Published var hasMore = true
     
     @Published var viewMode: ViewMode = .grid
-    @Published var groupFilter: Int32 = 0
+    /// nil = 全部；否则按 Android 的位掩码语义 `(book.group & groupId) > 0` 过滤
+    @Published var selectedGroupId: Int64? = nil
+    @Published var groups: [BookGroup] = []
     @Published var sortBy: SortBy = .lastRead
     
     private let pageSize = 50
@@ -28,11 +30,36 @@ final class BookshelfViewModel: ObservableObject {
         case list = 1
     }
     
+    /// 排序枚举与 Android `bookshelfSort` 编号一致
     enum SortBy: Int, CaseIterable {
-        case lastRead = 0
-        case name = 1
-        case author = 2
-        case update = 3
+        case lastRead = 0     // 最后阅读时间（durChapterTime）降序
+        case update = 1       // 更新时间（latestChapterTime）降序
+        case name = 2         // 书名
+        case manual = 3       // 手动排序（order 升序）
+        case combined = 4     // max(更新时间, 阅读时间) 降序
+        case author = 5       // 作者
+
+        var title: String {
+            switch self {
+            case .lastRead: return "最近阅读"
+            case .update: return "更新时间"
+            case .name: return "书名"
+            case .manual: return "手动排序"
+            case .combined: return "综合排序"
+            case .author: return "作者"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .lastRead: return "clock"
+            case .update: return "arrow.triangle.2.circlepath"
+            case .name: return "textformat"
+            case .manual: return "hand.draw"
+            case .combined: return "square.stack.3d.up"
+            case .author: return "person"
+            }
+        }
     }
     
     private var loadTask: Task<Void, Never>?
@@ -55,6 +82,7 @@ final class BookshelfViewModel: ObservableObject {
             }
             books = firstPage
             hasMore = firstPage.count == pageSize
+            loadGroups()
             normalizeCoverURLs()
         } catch {
             errorMessage = "加载失败：\(error.localizedDescription)"
@@ -118,27 +146,65 @@ final class BookshelfViewModel: ObservableObject {
         let context = CoreDataStack.shared.viewContext
 
         let request: NSFetchRequest<Book> = Book.fetchRequest()
-        request.fetchLimit = size
-        request.fetchOffset = page * size
 
-        if groupFilter != 0 {
-            request.predicate = NSPredicate(format: "group == %d", groupFilter)
+        // Android 用位掩码标识分组（一本书可属于多个分组），Core Data 谓词不支持位运算，
+        // 选中分组时取全量后内存过滤再切片
+        if selectedGroupId == nil {
+            request.fetchLimit = size
+            request.fetchOffset = page * size
         }
 
         switch sortBy {
         case .lastRead:
             request.sortDescriptors = [NSSortDescriptor(key: "durChapterTime", ascending: false)]
+        case .update:
+            request.sortDescriptors = [NSSortDescriptor(key: "latestChapterTime", ascending: false)]
         case .name:
             request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        case .manual:
+            request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+        case .combined:
+            request.sortDescriptors = [
+                NSSortDescriptor(key: "latestChapterTime", ascending: false),
+                NSSortDescriptor(key: "durChapterTime", ascending: false)
+            ]
         case .author:
             request.sortDescriptors = [NSSortDescriptor(key: "author", ascending: true)]
-        case .update:
-            request.sortDescriptors = [NSSortDescriptor(key: "lastCheckTime", ascending: false)]
+        }
+
+        if selectedGroupId != nil {
+            let all = try context.fetch(request)
+            let filtered = applyGroupFilter(to: all)
+            let start = page * size
+            let end = min(start + size, filtered.count)
+            guard start < end else { return [] }
+            return Array(filtered[start..<end])
         }
 
         return try context.fetch(request)
     }
+
+    /// 切换分组后重新加载
+    func selectGroup(_ groupId: Int64?) {
+        selectedGroupId = groupId
+        Task { await loadBooks() }
+    }
     
+    /// 读取可见分组（Android BookGroup.show + order）
+    func loadGroups() {
+        let request: NSFetchRequest<BookGroup> = BookGroup.fetchRequest()
+        request.predicate = NSPredicate(format: "show == YES")
+        request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+        groups = (try? CoreDataStack.shared.viewContext.fetch(request)) ?? []
+    }
+
+    /// 按当前分组过滤（位掩码语义）
+    private func applyGroupFilter(to books: [Book]) -> [Book] {
+        guard let groupId = selectedGroupId else { return books }
+        if groupId == BookGroup.allGroupId { return books }
+        return books.filter { ($0.group & groupId) > 0 }
+    }
+
     func refreshBooks() async {
         await loadBooks()
     }

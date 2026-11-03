@@ -223,6 +223,32 @@ struct TTSControlsView: View {
                 ), in: 0.5...2.0)
             }
             
+            // 定时停止
+            HStack {
+                Text("定时停止")
+                    .font(.subheadline)
+
+                Spacer()
+
+                if let remaining = ttsManager.sleepTimerRemaining {
+                    Text(formatRemaining(remaining))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                }
+
+                Menu {
+                    Button("15 分钟") { ttsManager.startSleepTimer(minutes: 15) }
+                    Button("30 分钟") { ttsManager.startSleepTimer(minutes: 30) }
+                    Button("60 分钟") { ttsManager.startSleepTimer(minutes: 60) }
+                    Divider()
+                    Button("关闭定时") { ttsManager.cancelSleepTimer() }
+                } label: {
+                    Text(ttsManager.sleepTimerRemaining == nil ? "未设置" : "已设置")
+                        .font(.caption)
+                }
+            }
+
             // 声音选择
             Button {
                 showVoicePicker = true
@@ -260,19 +286,31 @@ struct TTSControlsView: View {
     
     private func startReading() {
         guard let content = viewModel.chapterContent else { return }
-        
+
         // 将内容分页
         let pages = content.components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        
+
+        // 锁屏 / 控制中心信息 + 上一章/下一章
+        ttsManager.nowPlayingTitle = viewModel.currentBook?.name ?? "朗读"
+        ttsManager.nowPlayingSubtitle = viewModel.currentChapter?.title ?? ""
+        ttsManager.onNextChapter = {
+            Task { await viewModel.nextChapter() }
+        }
+        ttsManager.onPreviousChapter = {
+            Task { await viewModel.prevChapter() }
+        }
+        ttsManager.updateNowPlayingInfo()
+
         ttsManager.speakParagraphs(
             pages,
             onParagraphComplete: {
                 // 段落完成回调
             },
             onTextComplete: {
-                // 全部完成回调
+                // 本章读完自动接下一章
+                Task { await viewModel.nextChapter() }
             }
         )
     }
@@ -365,5 +403,10 @@ struct VoicePickerView: View {
             viewModel: ReaderViewModel(),
             isPresented: .constant(true)
         )
+    }
+
+    private func formatRemaining(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

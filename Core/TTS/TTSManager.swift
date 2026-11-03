@@ -8,6 +8,7 @@
 
 import Foundation
 import AVFoundation
+import MediaPlayer
 import Combine
 
 // MARK: - TTS 状态
@@ -64,6 +65,19 @@ class TTSManager: NSObject, ObservableObject {
     @Published private(set) var totalCharacters: Int = 0
     @Published private(set) var spokenCharacters: Int = 0
     @Published private(set) var availableVoices: [AVSpeechSynthesisVoice] = []
+
+    /// 定时停止剩余秒数（nil = 未设置）
+    @Published private(set) var sleepTimerRemaining: TimeInterval?
+
+    /// 锁屏 / 控制中心展示信息
+    var nowPlayingTitle: String = ""
+    var nowPlayingSubtitle: String = ""
+
+    /// 锁屏「上一章 / 下一章」回调（由阅读器注入）
+    var onNextChapter: (() -> Void)?
+    var onPreviousChapter: (() -> Void)?
+
+    private var sleepTimer: Timer?
     
     // MARK: - 配置
     
@@ -88,6 +102,8 @@ class TTSManager: NSObject, ObservableObject {
         synthesizer.delegate = self
         loadAvailableVoices()
         loadSavedConfig()
+        configureAudioSession()
+        setupRemoteCommands()
     }
     
     // MARK: - 公开方法
@@ -325,6 +341,93 @@ class TTSManager: NSObject, ObservableObject {
         defaults.set(config.pitch, forKey: "tts.pitch")
         defaults.set(config.volume, forKey: "tts.volume")
         defaults.set(config.voiceIdentifier, forKey: "tts.voiceId")
+    }
+}
+
+// MARK: - 定时停止 / 后台播放
+
+extension TTSManager {
+
+    /// 定时停止（分钟）；到点自动暂停
+    func startSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        guard minutes > 0 else { return }
+
+        sleepTimerRemaining = TimeInterval(minutes * 60)
+
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let remaining = self.sleepTimerRemaining else { return }
+
+                let next = remaining - 1
+                if next <= 0 {
+                    self.cancelSleepTimer()
+                    self.pause()
+                    AppLogger.info("TTS", "定时停止已触发")
+                } else {
+                    self.sleepTimerRemaining = next
+                }
+            }
+        }
+    }
+
+    func cancelSleepTimer() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        sleepTimerRemaining = nil
+    }
+
+    /// 后台朗读需要 .playback + spokenAudio，否则切后台会被系统挂起
+    func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? session.setActive(true)
+    }
+
+    /// 锁屏 / 控制中心的播放控制
+    func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.resume() }
+            return .success
+        }
+
+        center.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.pause() }
+            return .success
+        }
+
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.toggle() }
+            return .success
+        }
+
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.onNextChapter?() }
+            return .success
+        }
+
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.onPreviousChapter?() }
+            return .success
+        }
+    }
+
+    /// 刷新锁屏上的标题与播放状态
+    func updateNowPlayingInfo() {
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: nowPlayingTitle.isEmpty ? "朗读" : nowPlayingTitle,
+            MPMediaItemPropertyArtist: nowPlayingSubtitle,
+            MPNowPlayingInfoPropertyPlaybackRate: state.isSpeaking ? 1.0 : 0.0
+        ]
+
+        if totalCharacters > 0 {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(spokenCharacters)
+            info[MPMediaItemPropertyPlaybackDuration] = Double(totalCharacters)
+        }
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 }
 

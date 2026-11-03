@@ -21,6 +21,8 @@ struct BookshelfView: View {
     @State private var isSelecting = false
     @State private var selectedBookIds: Set<UUID> = []
     @State private var showingGroupPicker = false
+    /// 网格列数（对齐 Android bookshelfLayout：≥2 为网格列数）
+    @AppStorage("bookshelfColumns") private var columns: Int = 3
     
     var body: some View {
         Group {
@@ -87,6 +89,19 @@ ToolbarItem(placement: .navigationBarTrailing) {
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
+                    }
+
+                    // 网格列数（Android bookshelfLayout 的 2..N）
+                    Menu {
+                        Picker("每行列数", selection: $columns) {
+                            Text("2 列").tag(2)
+                            Text("3 列").tag(3)
+                            Text("4 列").tag(4)
+                            Text("5 列").tag(5)
+                            Text("6 列").tag(6)
+                        }
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
                     }
 
                     Button(action: { showingSourceManage = true }) {
@@ -277,11 +292,13 @@ ToolbarItem(placement: .navigationBarTrailing) {
     
     private var bookGridView: some View {
         ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 16) {
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: 12),
+                    count: max(2, min(6, columns))
+                ),
+                spacing: 16
+            ) {
                 ForEach(viewModel.books, id: \.bookId) { book in
                     if isSelecting {
                         Button {

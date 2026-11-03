@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Network
 import UniformTypeIdentifiers
 
 struct MainTabView: View {
@@ -359,9 +360,31 @@ struct CacheCleanView: View {
     @State private var isClearing = false
     @State private var showingAlert = false
     @State private var alertMessage = ""
-    
+
+    // 自动缓存策略（对齐 Android 缓存设置）
+    @AppStorage("cachePreloadCount") private var preloadCount: Int = 3
+    @AppStorage("cacheWiFiOnly") private var wifiOnly: Bool = false
+    @AppStorage("cacheLimitMB") private var cacheLimitMB: Int = 500
+
     var body: some View {
         List {
+            Section("自动缓存") {
+                Stepper(
+                    "预下载章节：前后各 \(preloadCount) 章",
+                    value: $preloadCount,
+                    in: 0...10
+                )
+
+                Toggle("仅在 Wi-Fi 下缓存", isOn: $wifiOnly)
+
+                Stepper(
+                    cacheLimitMB == 0 ? "缓存上限：不限" : "缓存上限：\(cacheLimitMB) MB",
+                    value: $cacheLimitMB,
+                    in: 0...5000,
+                    step: 100
+                )
+            }
+
             Section("缓存占用") {
                 HStack {
                     Label("图片缓存", systemImage: "photo")
@@ -1171,5 +1194,26 @@ final class ExploreListViewModel: ObservableObject {
 
         alertMessage = "已加入书架"
         showingAlert = true
+    }
+}
+
+// MARK: - 网络状态
+
+/// 简单的网络状态观察（Wi-Fi 判断用于「仅 Wi-Fi 缓存」与离线提示）
+final class NetworkMonitor {
+    static let shared = NetworkMonitor()
+
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "com.legado.network.monitor")
+
+    private(set) var isConnected = true
+    private(set) var isWiFi = true
+
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.isConnected = path.status == .satisfied
+            self?.isWiFi = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
+        }
+        monitor.start(queue: queue)
     }
 }

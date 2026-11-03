@@ -363,7 +363,11 @@ class ReaderViewModel: ObservableObject {
                 )
             }
         } catch {
-            errorMessage = "加载章节失败：\(error.localizedDescription)"
+            if !NetworkMonitor.shared.isConnected {
+                errorMessage = "无网络连接，且该章未缓存"
+            } else {
+                errorMessage = "加载章节失败：\(Self.friendlyError(error))"
+            }
             isLoading = false
             throw error
         }

@@ -304,30 +304,81 @@ struct BookDetailView: View {
     // MARK: - 书籍信息
     private var bookInfoSection: some View {
         SectionCard(title: "书籍信息") {
-            Grid {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                 GridRow {
                     Label("书源", systemImage: "link")
                     Text(book.originName)
+                        .lineLimit(1)
                 }
-                
+
                 GridRow {
                     Label("章节", systemImage: "list.bullet")
                     Text("\(book.totalChapterNum) 章")
                 }
-                
+
                 GridRow {
                     Label("进度", systemImage: "gauge")
                     Text("\(Int(book.readProgress * 100))%")
                 }
-                
-                if let wordCount = book.wordCount {
+
+                if let wordCount = book.wordCount, !wordCount.isEmpty {
                     GridRow {
                         Label("字数", systemImage: "text.alignleft")
                         Text(wordCount)
                     }
                 }
+
+                // 书源能力（对齐 Android 详情页的源信息与菜单显隐依据）
+                if let source = viewModel.currentSource {
+                    GridRow {
+                        Label("类型", systemImage: "square.grid.2x2")
+                        Text(sourceTypeName(source))
+                    }
+
+                    if let group = source.bookSourceGroup, !group.isEmpty {
+                        GridRow {
+                            Label("分组", systemImage: "folder")
+                            Text(group)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    GridRow {
+                        Label("地址", systemImage: "globe")
+                        Text(source.bookSourceUrl)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if source.requiresLogin {
+                        GridRow {
+                            Label("登录", systemImage: "person.badge.key")
+                            Text("该源需要登录")
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
             }
             .font(.caption)
+
+            if let source = viewModel.currentSource {
+                NavigationLink {
+                    SourceEditView(viewModel: SourceEditViewModel(source: source))
+                } label: {
+                    Label("查看/编辑书源", systemImage: "square.and.pencil")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func sourceTypeName(_ source: BookSource) -> String {
+        switch source.bookSourceType {
+        case 1: return "有声"
+        case 2: return "漫画"
+        case 3: return "文件"
+        default: return "文本"
         }
     }
 }

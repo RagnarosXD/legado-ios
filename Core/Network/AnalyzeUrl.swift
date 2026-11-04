@@ -31,6 +31,7 @@ struct AnalyzedUrl {
     enum HTTPMethod: String {
         case get = "GET"
         case post = "POST"
+        case head = "HEAD"
     }
 }
 
@@ -86,7 +87,11 @@ class AnalyzeUrl {
         
         // 3. 解析 HTTP 方法
         if let method = configJson?["method"] as? String {
-            result.method = method.uppercased() == "POST" ? .post : .get
+            switch method.uppercased() {
+            case "POST": result.method = .post
+            case "HEAD": result.method = .head
+            default: result.method = .get
+            }
         }
         
         // 4. 解析 POST body
@@ -457,8 +462,11 @@ class AnalyzeUrl {
             let looksLikeXML = body.hasPrefix("<")
 
             if !hasContentType, !looksLikeJSON, !looksLikeXML, analyzedUrl.method == .post {
-                // Android analyzeFields：表单体逐字段编码（空格→+，中文百分号编码）
-                request.httpBody = encodeFormBody(body, charsetName: analyzedUrl.charset)
+                // 对齐 Android：表单体若已包含百分号编码（%XX），说明规则已编码过，不再二次编码
+                let looksEncoded = body.contains("%") && body.contains("=")
+                request.httpBody = looksEncoded
+                    ? body.data(using: .utf8)
+                    : encodeFormBody(body, charsetName: analyzedUrl.charset)
                 request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             } else {
                 request.httpBody = body.data(using: .utf8)

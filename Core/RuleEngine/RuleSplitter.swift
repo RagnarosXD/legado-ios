@@ -99,6 +99,16 @@ class RuleSplitter {
         if lowercased.hasPrefix("regex:") || lowercased.contains("{{regex") {
             return (.regex, trimmed)
         }
+
+        // 对齐 Android allInOne：首字符 `:` 表示整条规则是正则（AnalyzeRule.kt:599-603）。
+        // 为避免与 CSS 伪类（`:first-child`）冲突，只在含正则元字符时才判定为正则。
+        if trimmed.hasPrefix(":") && trimmed.count > 1 && !trimmed.hasPrefix("::") {
+            let body = String(trimmed.dropFirst())
+            let regexMeta = CharacterSet(charactersIn: "()[]|\\*+?^${}")
+            if body.unicodeScalars.contains(where: { regexMeta.contains($0) }) {
+                return (.regex, body)
+            }
+        }
         if lowercased.contains("{{js") || lowercased.contains("<js>") {
             return (.js, trimmed)
         }

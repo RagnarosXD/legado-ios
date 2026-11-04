@@ -225,18 +225,21 @@ class RuleSplitter {
     struct JSSegment {
         var isJS: Bool
         var text: String
+        /// `@webjs:` 段：用 WebView 执行（对齐 Android Mode.WebJs）
+        var isWebJS: Bool = false
     }
 
     /// 按 `<js>...</js>` / `@js:...` 把规则切成「普通段 / JS 段」，
     /// 普通段在上一段结果上继续解析，JS 段执行脚本（Android AnalyzeRule.kt:593-636）
     static func splitByJSSegments(_ rule: String) -> [JSSegment] {
         let lowered = rule.lowercased()
-        guard lowered.contains("<js>") || lowered.contains("@js:") else {
+        guard lowered.contains("<js>") || lowered.contains("@js:") || lowered.contains("@webjs:") else {
             return [JSSegment(isJS: false, text: rule)]
         }
 
+        // @webjs: 段用 WebView 执行（对齐 Android Mode.WebJs），必须排在 @js: 之前
         guard let regex = try? NSRegularExpression(
-            pattern: #"(?is)<js>([\w\W]*?)</js>|@js:([\w\W]*)"#
+            pattern: #"(?is)<js>([\w\W]*?)</js>|@webjs:([\w\W]*)|@js:([\w\W]*)"#
         ) else {
             return [JSSegment(isJS: false, text: rule)]
         }
@@ -260,15 +263,21 @@ class RuleSplitter {
             }
 
             var body = ""
+            var isWebJS = false
+
             if match.range(at: 2).location != NSNotFound, let r = Range(match.range(at: 2), in: rule) {
                 body = String(rule[r])
+                isWebJS = true
             } else if match.range(at: 1).location != NSNotFound, let r = Range(match.range(at: 1), in: rule) {
+                body = String(rule[r])
+            } else if match.range(at: 3).location != NSNotFound, let r = Range(match.range(at: 3), in: rule) {
                 body = String(rule[r])
             }
 
             segments.append(JSSegment(
                 isJS: true,
-                text: body.trimmingCharacters(in: .whitespacesAndNewlines)
+                text: body.trimmingCharacters(in: .whitespacesAndNewlines),
+                isWebJS: isWebJS
             ))
             cursor = fullRange.upperBound
         }

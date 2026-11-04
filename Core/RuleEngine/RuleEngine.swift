@@ -251,16 +251,20 @@ class RuleEngine {
 
     private func executeAnd(segments: [String], context: ExecutionContext) throws -> RuleResult {
         var values: [String] = []
+        var hasListResult = false
 
         for segment in segments {
             let result = try executeWithSplit(segment, context: context)
+            if case .list = result { hasListResult = true }
             values.append(contentsOf: flatten(result))
             context.lastResult = result
         }
 
         if values.isEmpty { return .none }
-        // Android 文本结果是 \n 连接（AnalyzeByJSoup.getString 多结果 join）
-        return .string(values.joined(separator: "\n"))
+
+        // 对齐 Android AnalyzeByJSoup.kt:84-119：
+        // 列表结果 addAll 保持列表；纯文本结果按 \n 连接
+        return hasListResult ? .list(values) : .string(values.joined(separator: "\n"))
     }
 
     private func executeOr(segments: [String], context: ExecutionContext) throws -> RuleResult {
@@ -306,6 +310,24 @@ class RuleEngine {
         var lastText: String?
 
         for segment in segments {
+            if segment.isWebJS {
+                // 用 WebView 加载当前页面后执行脚本（对齐 Android AnalyzeRule 的 Mode.WebJs）
+                let pageUrl = context.baseURL?.absoluteString
+                    ?? context.source?.bookSourceUrl
+                    ?? ""
+
+                var output = ""
+                #if os(iOS)
+                output = WebViewFetcher.shared.fetch(url: pageUrl, script: segment.text)
+                #else
+                AppLogger.warn("Rule", "@webjs: 仅 iOS 支持，已跳过")
+                #endif
+
+                lastText = output
+                context.lastResult = .string(output)
+                continue
+            }
+
             if segment.isJS {
                 if let lastText, let jsContext = context.jsContext {
                     jsContext.setObject(lastText, forKeyedSubscript: "result" as NSString)

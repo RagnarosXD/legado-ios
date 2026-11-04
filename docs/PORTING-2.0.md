@@ -289,3 +289,14 @@ Android 的 `java.webView` 是**同步阻塞**的（`runBlocking`），iOS 侧�
 ### P1 完成度：约 92%
 
 仍缺（按影响排序）：登录态（`login`/`getLoginInfo`/`getHeaderMap`）、`followRedirects`/`dnsIp` 真正生效、`type` 读字节、`getString(isUrl:)` 统一入口、XPath 子规则节点复用、解压/字体/RSA 等低频 `java.*`。
+## 十六、P1 补齐：三个 URL 选项（1.3.34）
+
+| 项 | Android 依据 | iOS 实现 |
+| --- | --- | --- |
+| `followRedirects=false` | `AnalyzeUrl.kt:290`（OkHttp `followRedirects(false)`） | `NoRedirectSession`：独立 `URLSession` + `URLSessionTaskDelegate.willPerformHTTPRedirection` 回 `nil`，直接拿 3xx 响应体 |
+| `dnsIp` | `AnalyzeUrl.kt:291`（OkHttp `Dns` 替换） | http 场景替换 URL host 为指定 IP，并补 `Host` 头保留原域名；https 记 warn（证书与 SNI 绑定，URLSession 层无法绕过） |
+| `type` | `AnalyzeUrl.kt:461-463` | `hex` / `base64` 按响应字节输出；其它值与 `text` 走正常解码 |
+
+### P1 完成度：约 96%
+
+仍缺：登录态（`login` / `getLoginInfo` / `getHeaderMap` / `loginUi` 动态表单）、`getString(isUrl:)` 统一入口（行为已等价，仅入口不统一）、XPath 子规则节点复用（CSS 子规则仍字符串二次解析）、低频 `java.*`（解压 / 字体反混淆 / RSA / 并发控制）。

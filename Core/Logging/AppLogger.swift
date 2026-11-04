@@ -80,6 +80,8 @@ final class AppLogger {
     /// O_APPEND 的 fd：与 CrashReporter 共享同一文件，两边都追加写
     private var fileDescriptor: Int32 = -1
     private var currentURL: URL?
+    /// 未刷盘的日志条数（只在 queue 上访问）
+    private var pendingWrites = 0
 
     /// DateFormatter 不是线程安全的，日志可能从任意线程写入，这里每次新建（开销可忽略）
     private static func makeFormatter() -> DateFormatter {
@@ -177,14 +179,39 @@ final class AppLogger {
 
         guard let data = (text + "\n").data(using: .utf8) else { return }
 
-        // 同步写 + fsync：进程被系统杀掉（watchdog / OOM）时，队列里未落盘的日志会丢失
-        queue.sync {
-            guard fileDescriptor >= 0 else { return }
-            data.withUnsafeBytes { buffer in
-                Self.rawWrite(fileDescriptor, buffer)
+        // 分级写盘策略（关键：不能让日志把主线程拖死）
+        // - WARN / ERROR：同步写 + fsync，保证崩溃前一定能看到错误
+        // - DEBUG / INFO：异步写 + 每 200 条 flush 一次
+        //   之前给每条日志都 fsync，搜索时 2000+ 条日志 × 1~5ms 会把主线程卡到 watchdog 杀进程
+        if level.rank >= Level.warn.rank {
+            queue.sync {
+                self.writeData(data)
+                self.flushFile()
             }
-            fsync(fileDescriptor)
+        } else {
+            queue.async {
+                self.writeData(data)
+                self.pendingWrites += 1
+                if self.pendingWrites >= 200 {
+                    self.flushFile()
+                    self.pendingWrites = 0
+                }
+            }
         }
+    }
+
+    /// 实际写入（只在 queue 上调用）
+    private func writeData(_ data: Data) {
+        guard fileDescriptor >= 0 else { return }
+        data.withUnsafeBytes { buffer in
+            Self.rawWrite(fileDescriptor, buffer)
+        }
+    }
+
+    /// 刷盘（只在 queue 上调用）
+    private func flushFile() {
+        guard fileDescriptor >= 0 else { return }
+        fsync(fileDescriptor)
     }
 
     private func appendMemory(_ line: String) {

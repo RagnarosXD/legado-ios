@@ -98,6 +98,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // 启动 3 秒后仍存活才标记为「正常启动」，用于下次判断是否异常退出
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             CrashReporter.markLaunchFinished()
+            // 主线程卡顿检测：卡住超过 8 秒会写一条 ERROR，便于区分「卡死被系统杀」和「真崩溃」
+            MainThreadWatchdog.shared.start()
             AppLogger.info("App", "启动完成")
         }
 

@@ -2,16 +2,15 @@
 //  CrashReporter.swift
 //  Legado-iOS
 //
-//  崩溃捕获（全部写进同一个主日志 Documents/Logs/legado.log）：
-//  - ObjC 异常（NSException）：记录 name / reason / callStackSymbols / 最近日志
-//  - 信号（SIGABRT / SIGSEGV / SIGBUS / SIGILL / SIGFPE / SIGTRAP）：只用
-//    async-signal-safe 的 write + backtrace_symbols_fd 追加 backtrace
-//  - 不再每次启动预创建 crash-*.log（旧版那种空文件会导致真正的崩溃报告被覆盖）
-//  - 启动时把旧版遗留的 crash-*.log 合并进主日志后删除
+//  崩溃捕获（写进同一个主日志 Documents/Logs/legado.log）
+//
+//  设计约束：信号处理里**绝不能**调用 Swift 运行时 / Foundation / 分配内存，
+//  否则会在信号上下文死锁，进程被系统强杀，连日志都写不出来。
+//  因此所有字符串与缓冲区都在 install() 时预先生成（C 语义），
+//  信号里只做：write() + backtrace() + backtrace_symbols_fd() + fsync()。
 //
 
 import Foundation
-import Darwin
 import UIKit
 
 enum CrashReporter {
@@ -19,8 +18,29 @@ enum CrashReporter {
     private static var installed = false
     private static let launchFlagKey = "legado.lastLaunchFinished"
 
-    /// 预先打开的主日志 fd（O_APPEND），供信号上下文安全使用
+    /// 主日志 fd（O_APPEND），install 时预打开
     private static var logFileDescriptor: Int32 = -1
+
+    // MARK: - 预分配缓冲（信号上下文只读，不分配）
+
+    private static var headerCString: UnsafeMutablePointer<CChar>?
+    private static var midCString: UnsafeMutablePointer<CChar>?
+    private static var tailCString: UnsafeMutablePointer<CChar>?
+
+    private static var nameABRTCString: UnsafeMutablePointer<CChar>?
+    private static var nameSEGVCString: UnsafeMutablePointer<CChar>?
+    private static var nameBUSCString: UnsafeMutablePointer<CChar>?
+    private static var nameILLCString: UnsafeMutablePointer<CChar>?
+    private static var nameFPECString: UnsafeMutablePointer<CChar>?
+    private static var nameTRAPCString: UnsafeMutablePointer<CChar>?
+
+    private static let maxFrames = 96
+    /// 预分配的回溯缓冲区（信号里不能 malloc）
+    private static var framesBuffer: UnsafeMutablePointer<UnsafeMutableRawPointer?> = {
+        let pointer = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: maxFrames)
+        pointer.initialize(repeating: nil, count: maxFrames)
+        return pointer
+    }()
 
     // MARK: - 安装
 
@@ -28,41 +48,100 @@ enum CrashReporter {
         guard !installed else { return }
         installed = true
 
-        let previousLaunchFinished = UserDefaults.standard.bool(forKey: launchFlagKey)
-        if previousLaunchFinished == false {
-            AppLogger.warn("Crash", "检测到上次未正常退出（watchdog / OOM 或被手动强杀都不会有 backtrace）")
+        // 上次是否走到「正常进入前台」——没走到就当异常退出
+        if UserDefaults.standard.bool(forKey: launchFlagKey) {
+            AppLogger.warn("Crash", "检测到上次未正常退出（被系统强杀时不会有 backtrace）")
         }
-        UserDefaults.standard.set(false, forKey: launchFlagKey)
 
         // 旧版散落的 crash-*.log 合并进主日志（空文件直接删除）
         AppLogger.shared.mergeLegacyCrashReports()
 
-        // 预打开主日志：信号处理里不能再 open / 做 FileManager 操作
         logFileDescriptor = AppLogger.openAppendDescriptor()
 
-        // ObjC 异常（SwiftSoup / Core Data / UIKit 抛的 NSException 会走这里）
+        prepareSignalBuffers()
+
+        // ObjC 异常：不是信号上下文，可以正常用 Swift
         NSSetUncaughtExceptionHandler { exception in
             CrashReporter.appendExceptionReport(exception)
         }
 
-        // 信号：只用 async-signal-safe 的 write + backtrace_symbols_fd
         let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
         for sig in signals {
             signal(sig) { received in
                 CrashReporter.writeSignalSnapshot(received)
-                // 恢复默认处理并重新抛出，保留系统崩溃日志
                 signal(received, SIG_DFL)
                 raise(received)
             }
         }
-    }
 
-    /// App 正常进入前台后标记一次，用来判断下次启动是否为异常退出
-    static func markLaunchFinished() {
+        // 标脏：正常进入前台后由 markLaunchFinished 置为 false
         UserDefaults.standard.set(true, forKey: launchFlagKey)
     }
 
-    // MARK: - NSException
+    /// 在 install() 阶段把所有字符串与缓冲区准备好（此时可以安全分配）
+    private static func prepareSignalBuffers() {
+        let version = AppLogger.appVersion
+        headerCString = strdup("\n===== 崩溃（signal backtrace）=====\nversion: \(version)\nsignal: ")
+        midCString = strdup("\n--- backtrace ---\n")
+        tailCString = strdup("===== backtrace 结束 =====\n")
+
+        nameABRTCString = strdup("SIGABRT —— 断言失败 / Swift 数组越界 / force unwrap nil / ObjC 异常")
+        nameSEGVCString = strdup("SIGSEGV —— 访问非法内存")
+        nameBUSCString = strdup("SIGBUS —— 内存对齐或映射错误")
+        nameILLCString = strdup("SIGILL —— 非法指令")
+        nameFPECString = strdup("SIGFPE —— 算术异常")
+        nameTRAPCString = strdup("SIGTRAP —— 断点 / Swift 运行时 trap")
+    }
+
+    /// App 正常进入前台后调用：下次启动就不会误报「异常退出」
+    static func markLaunchFinished() {
+        UserDefaults.standard.set(false, forKey: launchFlagKey)
+    }
+
+    // MARK: - 信号快照（只做 C 语义操作）
+
+    private static func writeSignalSnapshot(_ sig: Int32) {
+        let fd = logFileDescriptor
+        guard fd >= 0 else { return }
+
+        writeCString(headerCString, to: fd)
+
+        switch sig {
+        case SIGABRT: writeCString(nameABRTCString, to: fd)
+        case SIGSEGV: writeCString(nameSEGVCString, to: fd)
+        case SIGBUS:  writeCString(nameBUSCString, to: fd)
+        case SIGILL:  writeCString(nameILLCString, to: fd)
+        case SIGFPE:  writeCString(nameFPECString, to: fd)
+        case SIGTRAP: writeCString(nameTRAPCString, to: fd)
+        default: break
+        }
+
+        writeCString(midCString, to: fd)
+
+        let count = backtrace(framesBuffer, Int32(maxFrames))
+        if count > 0 {
+            backtrace_symbols_fd(framesBuffer, count, fd)
+        }
+
+        writeCString(tailCString, to: fd)
+        fsync(fd)
+    }
+
+    /// 写入预分配的 C 字符串（信号安全：只调 write/strlen）
+    private static func writeCString(_ pointer: UnsafeMutablePointer<CChar>?, to fd: Int32) {
+        guard let pointer else { return }
+        let length = strlen(pointer)
+        guard length > 0 else { return }
+
+        var written = 0
+        while written < length {
+            let result = write(fd, pointer.advanced(by: written), length - written)
+            if result <= 0 { break }
+            written += result
+        }
+    }
+
+    // MARK: - NSException（普通上下文，可用 Swift）
 
     private static func appendExceptionReport(_ exception: NSException) {
         var lines: [String] = []
@@ -80,63 +159,10 @@ enum CrashReporter {
         lines.append("===== 崩溃结束 =====")
         lines.append("")
 
-        // 崩溃上下文里不依赖 FileHandle 的锁，直接 open + write
-        let path = AppLogger.directory.appendingPathComponent(AppLogger.activeFileName).path
-        path.withCString { pointer in
-            let fd = open(pointer, O_WRONLY | O_CREAT | O_APPEND, 0o644)
-            guard fd >= 0 else { return }
-            writeText(lines.joined(separator: "\n") + "\n", to: fd)
-            fsync(fd)
-            close(fd)
-        }
+        appendText(lines.joined(separator: "\n") + "\n")
     }
 
-    // MARK: - 信号快照（async-signal-safe）
-
-    private static func writeSignalSnapshot(_ sig: Int32) {
-        let fd = logFileDescriptor
-        guard fd >= 0 else { return }
-
-        writeCString("\n===== 崩溃（signal backtrace）=====\n", to: fd)
-        writeCString(signalName(sig), to: fd)
-        writeCString("\n", to: fd)
-        writeCString("version: ", to: fd)
-        writeCString(AppLogger.appVersion, to: fd)
-        writeCString("\n--- backtrace ---\n", to: fd)
-
-        // backtrace + backtrace_symbols_fd 是 async-signal-safe 的，不依赖 Swift/Foundation
-        var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 96)
-        let count = backtrace(&frames, 96)
-        if count > 0 {
-            backtrace_symbols_fd(&frames, count, fd)
-        }
-
-        writeCString("===== backtrace 结束 =====\n", to: fd)
-        fsync(fd)
-    }
-
-    private static func writeCString(_ text: String, to fd: Int32) {
-        text.withCString { pointer in
-            _ = write(fd, pointer, strlen(pointer))
-        }
-    }
-
-    private static func writeText(_ text: String, to fd: Int32) {
-        guard let data = text.data(using: .utf8) else { return }
-        data.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var written = 0
-            while written < buffer.count {
-                let result = write(fd, base.advanced(by: written), buffer.count - written)
-                if result <= 0 { break }
-                written += result
-            }
-        }
-    }
-
-    // MARK: - 兼容旧 API
-
-    /// 保留给其它调用方：直接把一段报告追加进主日志
+    /// 兼容旧 API
     static func writeReport(kind: String, detail: String, callStack: [String]) {
         var lines: [String] = []
         lines.append("")
@@ -152,27 +178,30 @@ enum CrashReporter {
         lines.append("===== 崩溃结束 =====")
         lines.append("")
 
+        appendText(lines.joined(separator: "\n") + "\n")
+    }
+
+    /// 直接追加到主日志（崩溃上下文里不依赖 AppLogger 的锁）
+    private static func appendText(_ text: String) {
+        guard let data = text.data(using: .utf8) else { return }
+
         let path = AppLogger.directory.appendingPathComponent(AppLogger.activeFileName).path
         path.withCString { pointer in
             let fd = open(pointer, O_WRONLY | O_CREAT | O_APPEND, 0o644)
             guard fd >= 0 else { return }
-            writeText(lines.joined(separator: "\n") + "\n", to: fd)
+
+            data.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                var written = 0
+                while written < buffer.count {
+                    let result = write(fd, base.advanced(by: written), buffer.count - written)
+                    if result <= 0 { break }
+                    written += result
+                }
+            }
+
             fsync(fd)
             close(fd)
-        }
-    }
-
-    // MARK: - 工具
-
-    private static func signalName(_ sig: Int32) -> String {
-        switch sig {
-        case SIGABRT: return "SIGABRT(\(sig))  —— 通常是被系统或断言终止（含 Swift 数组越界 / force unwrap nil）"
-        case SIGSEGV: return "SIGSEGV(\(sig))  —— 访问了非法内存"
-        case SIGBUS: return "SIGBUS(\(sig))  —— 内存对齐 / 映射错误"
-        case SIGILL: return "SIGILL(\(sig))  —— 非法指令"
-        case SIGFPE: return "SIGFPE(\(sig))  —— 算术异常"
-        case SIGTRAP: return "SIGTRAP(\(sig))  —— 断点 / Swift 运行时 trap"
-        default: return "SIG\(sig)"
         }
     }
 }

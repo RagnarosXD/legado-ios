@@ -129,6 +129,9 @@ class WebBook {
         // 对齐 Android：规则对象永不为 null，缺失时用空对象
         let searchRule = source.getSearchRule() ?? BookSource.SearchRule()
 
+        // 卡顿时能直接看出是哪个源在解析
+        MainThreadWatchdog.shared.beat("解析 \(source.bookSourceName)")
+
         let parsed = try parseBookList(
             source: source,
             body: body,

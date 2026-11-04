@@ -201,6 +201,7 @@ class SearchViewModel: ObservableObject {
                 guard let outcome = await group.next() else { break }
                 running -= 1
                 searchedSourceCount += 1
+                MainThreadWatchdog.shared.beat("搜索结果 \(outcome.name)")
 
                 if let failure = outcome.failure {
                     failures.append(failure)

@@ -20,6 +20,9 @@ struct ReaderSettingsFullView: View {
     @AppStorage("pageAnimation") private var storedPageAnimation: String = PageAnimation.cover.rawValue
     @AppStorage("reader.fontFamily") private var storedFontFamily: String = "System"
     @AppStorage("reader.showStatusBar") private var storedShowStatusBar: Bool = false
+    @AppStorage("reader.showHeaderFooter") private var showHeaderFooter = false
+    @AppStorage("reader.headerTemplate") private var headerTemplate = ""
+    @AppStorage("reader.footerTemplate") private var footerTemplate = "{{page}}/{{pages}}"
     @AppStorage("reader.clickToFlip") private var storedClickToFlip: Bool = true
     
     // 阅读配置
@@ -105,6 +108,20 @@ struct ReaderSettingsFullView: View {
                     }
                     
                     Toggle("点击翻页", isOn: $clickToFlip)
+
+                    Toggle("显示页眉页脚", isOn: $showHeaderFooter)
+
+                    if showHeaderFooter {
+                        TextField("页眉（如 {{chapterTitle}}）", text: $headerTemplate)
+                            .textInputAutocapitalization(.never)
+
+                        TextField("页脚（如 {{page}}/{{pages}}）", text: $footerTemplate)
+                            .textInputAutocapitalization(.never)
+
+                        Text("可用变量：{{page}} {{pages}} {{bookName}} {{chapterTitle}}")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Section(header: Text("显示")) {

@@ -93,6 +93,15 @@ struct PagedReaderView: View {
             .onChange(of: viewModel.textJustified) { _ in
                 invalidateAndResplit()
             }
+            .onChange(of: viewModel.showHeaderFooter) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.headerTemplate) { _ in
+                invalidateAndResplit()
+            }
+            .onChange(of: viewModel.footerTemplate) { _ in
+                invalidateAndResplit()
+            }
             .onChange(of: viewModel.fontFamily) { _ in
                 invalidateAndResplit()
             }
@@ -206,6 +215,15 @@ struct PagedReaderView: View {
         // 主线程只负责展示，避免长章节把界面卡住。
         let token = splitCoordinator.begin()
         let text = content
+
+        // 首屏优先：主线程先分第一页（只测量一页，通常 1~3ms），长章节也能立刻出字
+        if pages.isEmpty {
+            let firstPages = PageSplitter.splitFirstPages(text: text, config: config, limit: 1)
+            if let first = firstPages.first {
+                pages = [first]
+                viewModel.totalPages = max(1, firstPages.count)
+            }
+        }
 
         Task.detached(priority: .userInitiated) {
             let result = PageSplitCache.shared.getOrSplit(text: text, config: config)

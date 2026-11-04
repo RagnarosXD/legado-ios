@@ -72,12 +72,45 @@ struct PageTextView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            CoreTextPageRepresentable(
-                text: text,
-                config: viewModel.makePageConfig(containerSize: geometry.size),
-                textColor: UIColor(viewModel.textColor)
-            )
+            ZStack {
+                CoreTextPageRepresentable(
+                    text: text,
+                    config: viewModel.makePageConfig(containerSize: geometry.size),
+                    textColor: UIColor(viewModel.textColor)
+                )
+
+                // 页眉页脚（对齐 Android header/footer，占位由 PageConfig 预留）
+                if viewModel.showHeaderFooter {
+                    headerFooterOverlay
+                }
+            }
         }
+    }
+
+    private var headerFooterOverlay: some View {
+        VStack(spacing: 0) {
+            if !viewModel.headerTemplate.isEmpty {
+                Text(viewModel.renderHeaderFooter(viewModel.headerTemplate))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: ReaderViewModel.headerFooterLineHeight)
+            }
+
+            Spacer(minLength: 0)
+
+            if !viewModel.footerTemplate.isEmpty {
+                Text(viewModel.renderHeaderFooter(viewModel.footerTemplate))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: ReaderViewModel.headerFooterLineHeight)
+            }
+        }
+        .padding(.horizontal, 16)
+        .allowsHitTesting(false)
     }
 }
 

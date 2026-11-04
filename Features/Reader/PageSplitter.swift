@@ -36,6 +36,10 @@ struct PageConfig: @unchecked Sendable {
     var titleSizeDelta: CGFloat = 0
     /// 标题对齐（Android titleMode 0=居左 1=居中）
     var titleAlignment: NSTextAlignment = .left
+    /// 页眉占用高度（0 = 不显示，对齐 Android headerPadding）
+    var headerHeight: CGFloat = 0
+    /// 页脚占用高度（0 = 不显示，对齐 Android footerPadding）
+    var footerHeight: CGFloat = 0
     var containerSize: CGSize
     var font: UIFont
 
@@ -75,7 +79,7 @@ struct PageConfig: @unchecked Sendable {
     var contentSize: CGSize {
         CGSize(
             width: containerSize.width - margins.left - margins.right,
-            height: containerSize.height - margins.top - margins.bottom
+            height: containerSize.height - margins.top - margins.bottom - headerHeight - footerHeight
         )
     }
 
@@ -144,8 +148,19 @@ final class PageSplitter {
         return result.pages
     }
     
+    /// 只分前 `limit` 页（首屏优先：长章节也能立刻出字）
+    static func splitFirstPages(text: String, config: PageConfig, limit: Int = 1) -> [String] {
+        guard limit > 0 else { return [] }
+        return splitWithRanges(text: text, config: config, pageLimit: limit).pages
+    }
+
     /// 将文本分割为多页，同时返回每页对应的原文范围
-    static func splitWithRanges(text: String, config: PageConfig) -> PageSplitResult {
+    /// - Parameter pageLimit: 大于 0 时最多产出这么多页（默认全量）
+    static func splitWithRanges(
+        text: String,
+        config: PageConfig,
+        pageLimit: Int = 0
+    ) -> PageSplitResult {
         guard !text.isEmpty else {
             return PageSplitResult(pages: [], pageRanges: [])
         }
@@ -168,6 +183,11 @@ final class PageSplitter {
         let totalLength = attributedString.length
         
         while currentIndex < totalLength {
+            // 首屏优先：达到上限就停，剩余文本交给后台全量分页
+            if pageLimit > 0, pages.count >= pageLimit {
+                break
+            }
+
             // 计算当前页能容纳的文本范围
             let frameRange = CTFramesetterSuggestFrameSizeWithConstraints(
                 framesetter,
@@ -380,6 +400,8 @@ final class PageSplitCache: @unchecked Sendable {
         hasher.combine(config.titleText ?? "")
         hasher.combine(config.titleSizeDelta)
         hasher.combine(config.titleAlignment.rawValue)
+        hasher.combine(config.headerHeight)
+        hasher.combine(config.footerHeight)
         hasher.combine(config.margins.top)
         hasher.combine(config.margins.left)
         hasher.combine(config.margins.bottom)

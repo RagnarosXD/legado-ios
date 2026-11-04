@@ -83,6 +83,14 @@ class ReaderViewModel: ObservableObject {
     @Published var fontFamily: String? = nil {
         didSet { UserDefaults.standard.set(fontFamily, forKey: "reader.fontFamily") }
     }
+    /// 页眉/页脚（对齐 Android ReadBookConfig 的 header/footer）
+    @Published var showHeaderFooter: Bool = false
+    @Published var headerTemplate: String = ""
+    @Published var footerTemplate: String = "{{page}}/{{pages}}"
+
+    /// 页眉页脚行高（含上下留白）
+    static let headerFooterLineHeight: CGFloat = 18
+
     /// 章节标题显示方式（Android titleMode）：0 居左、1 居中、2 隐藏
     @Published var chapterTitleMode: Int = 0
     /// 标题字号增量（Android titleSize）
@@ -114,6 +122,13 @@ class ReaderViewModel: ObservableObject {
         if storedMargin > 0 {
             let margin = CGFloat(storedMargin)
             pagePadding = EdgeInsets(top: 20, leading: margin, bottom: 20, trailing: margin)
+        }
+
+        // 页眉页脚
+        showHeaderFooter = defaults.bool(forKey: "reader.showHeaderFooter")
+        headerTemplate = defaults.string(forKey: "reader.headerTemplate") ?? ""
+        if let storedFooter = defaults.string(forKey: "reader.footerTemplate") {
+            footerTemplate = storedFooter
         }
 
         if let storedTheme = defaults.string(forKey: "reader.theme") {
@@ -208,6 +223,12 @@ class ReaderViewModel: ObservableObject {
             fontFamily: fontFamily
         )
 
+        // 页眉/页脚占用正文高度
+        if showHeaderFooter {
+            config.headerHeight = headerTemplate.isEmpty ? 0 : Self.headerFooterLineHeight
+            config.footerHeight = footerTemplate.isEmpty ? 0 : Self.headerFooterLineHeight
+        }
+
         // Android titleMode：0 居左、1 居中、2 隐藏
         if chapterTitleMode != 2, let chapterTitle, !chapterTitle.isEmpty {
             config.titleText = chapterTitle
@@ -216,6 +237,26 @@ class ReaderViewModel: ObservableObject {
         }
 
         return config
+    }
+
+    /// 从设置页返回时重读页眉页脚（设置页用 @AppStorage 直接写 UserDefaults）
+    func reloadHeaderFooterPreferences() {
+        let defaults = UserDefaults.standard
+        showHeaderFooter = defaults.bool(forKey: "reader.showHeaderFooter")
+        headerTemplate = defaults.string(forKey: "reader.headerTemplate") ?? ""
+        footerTemplate = defaults.string(forKey: "reader.footerTemplate") ?? "{{page}}/{{pages}}"
+    }
+
+    /// 渲染页眉/页脚模板：{{page}} {{pages}} {{bookName}} {{chapterTitle}}
+    func renderHeaderFooter(_ template: String) -> String {
+        guard !template.isEmpty else { return "" }
+
+        var text = template
+        text = text.replacingOccurrences(of: "{{page}}", with: String(currentPageIndex + 1))
+        text = text.replacingOccurrences(of: "{{pages}}", with: String(max(1, totalPages)))
+        text = text.replacingOccurrences(of: "{{bookName}}", with: currentBook?.name ?? "")
+        text = text.replacingOccurrences(of: "{{chapterTitle}}", with: currentChapter?.title ?? "")
+        return text
     }
 
     private func themeFromStorage(_ raw: String) -> ReaderTheme {

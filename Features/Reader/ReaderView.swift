@@ -276,6 +276,11 @@ struct ReaderView: View {
                 }
                 readingEnhancementManager.startReadingSession()
             }
+            .onChange(of: showingSettings) { showing in
+                if !showing {
+                    viewModel.reloadHeaderFooterPreferences()
+                }
+            }
             .onDisappear {
                 UIApplication.shared.isIdleTimerDisabled = false
                 viewModel.saveProgress()

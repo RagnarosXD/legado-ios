@@ -318,3 +318,15 @@ Android 的 `java.webView` 是**同步阻塞**的（`runBlocking`），iOS 侧�
 - `java.login()` 在规则里调用时**不能弹出界面**（JSContext 同步执行），只记录日志并返回当前登录状态；登录需从书源管理手动进入
 - 依赖「网页端登录后拿 Cookie」的源无法在 App 内完成（iOS 与 Safari 不共享 Cookie，且当前没有可见 WebView 登录页）
 - 表单按钮的 `action` 暂未执行（只保存输入并跑 `loginCheckJs`）
+## 十八、P2 收尾（1.3.36）
+
+| # | 项 | 实现 | 状态 |
+| --- | --- | --- | --- |
+| 1 | 页眉页脚 | `PageConfig.headerHeight/footerHeight` 从正文高度扣除；`PageTextView` 叠加渲染；模板变量 `{{page}}` `{{pages}}` `{{bookName}}` `{{chapterTitle}}`；设置页开关 + 两个模板输入框；从设置页返回时 `reloadHeaderFooterPreferences()` 重读并触发重分页 | 新增 |
+| 2 | 首屏优先分页 | `PageSplitter.splitFirstPages(limit:)` 只测量第一页（1~3ms），主线程先显示；整章仍由后台 `Task.detached` 分页完成后替换；按 `splitCoordinator` 令牌防竞态 | 新增 |
+| 3 | 仿真翻页 | 已用 `UIPageViewController(transitionStyle: .pageCurl)`（系统原生仿真），无需自绘贝塞尔 | 已有 |
+| 4 | 书签面板 | `BookmarkSheet`：列表 + 添加 + 跳转 | 已有 |
+
+### P2 完成度：约 95%
+
+剩余：无阻断项。可选优化：分页增量产页（当前首屏优先 + 整章后台）、页眉页脚左右对齐方式（当前居中）。

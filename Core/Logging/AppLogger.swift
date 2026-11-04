@@ -138,6 +138,16 @@ final class AppLogger {
         return path.withCString { open($0, O_WRONLY | O_CREAT | O_APPEND, 0o644) }
     }
 
+    /// 跨平台追加写（Darwin / Glibc 的 write 符号不同，且不能与本类的 write(level:) 混淆）
+    private static func rawWrite(_ fd: Int32, _ buffer: UnsafeRawBufferPointer) {
+        guard fd >= 0, let base = buffer.baseAddress else { return }
+        #if canImport(Darwin)
+        _ = Darwin.write(fd, base, buffer.count)
+        #else
+        _ = Glibc.write(fd, base, buffer.count)
+        #endif
+    }
+
     // MARK: - 记录
 
     static func debug(_ tag: String, _ message: @autoclosure () -> String, file: String = #fileID, line: Int = #line) {
@@ -171,8 +181,7 @@ final class AppLogger {
         queue.sync {
             guard fileDescriptor >= 0 else { return }
             data.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress else { return }
-                _ = Darwin.write(fileDescriptor, base, buffer.count)
+                Self.rawWrite(fileDescriptor, buffer)
             }
             fsync(fileDescriptor)
         }
@@ -236,8 +245,7 @@ final class AppLogger {
 
         guard let data = line.data(using: .utf8) else { return }
         data.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            _ = Darwin.write(fileDescriptor, base, buffer.count)
+            Self.rawWrite(fileDescriptor, buffer)
         }
         fsync(fileDescriptor)
     }

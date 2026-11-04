@@ -269,3 +269,23 @@ WebDAV 备份/恢复/增量同步、本地备份导入导出、阅读统计基�
 ### P4 完成度：约 98%
 
 剩余未做：音量键翻页（iOS 无公开 API）、`java.webView` 类源能力（属 P1 范围）。
+## 十五、P1 剩余补齐（1.3.32 → 1.3.33）
+
+| # | 项 | Android 依据 | iOS 实现 |
+| --- | --- | --- | --- |
+| 1 | 书源 `header` 支持动态 JS | `BaseSource.getHeaderMap`（extractInlineJs + evalJS） | `AnalyzeUrl.resolveHeaderRule`：整体脚本 `<js>`/`@js:`、值内嵌 `<js>`、普通 JSON 三形态；解析失败只记日志不中断请求 |
+| 2 | JSONPath 函数 | Jayway JsonPath | `length/size/min/max/avg/sum/keys/toNumber`，在 token 循环层应用（作用于整个结果集） |
+| 3 | JSONPath 正则过滤 | `[?(@.name =~ /x/)]` | `matches` 支持 `=~`，自动剥离 `/…/` |
+| 4 | `java.webView` / `webViewGetSource` / `getWebViewUA` | `JsExtensions.kt:482-560` | `WebViewFetcher`（WKWebView 后台加载，加载完成后可执行 JS，超时 6s，离线直接返回空）；JSBridge 用 `#if os(iOS)` 隔离 |
+
+### 平台差异说明（webView）
+
+Android 的 `java.webView` 是**同步阻塞**的（`runBlocking`），iOS 侧同样阻塞，但由于 `WKWebView` 必须在主线程创建/回调，实现方式是「主线程泵 RunLoop 等待」：
+
+- 好处：规则里的同步调用能拿到结果
+- 代价：单次调用最长阻塞 6 秒（仅使用该能力的源会触发）
+- 保护：离线直接返回空串；失败只记 warn 日志，不影响整源
+
+### P1 完成度：约 92%
+
+仍缺（按影响排序）：登录态（`login`/`getLoginInfo`/`getHeaderMap`）、`followRedirects`/`dnsIp` 真正生效、`type` 读字节、`getString(isUrl:)` 统一入口、XPath 子规则节点复用、解压/字体/RSA 等低频 `java.*`。

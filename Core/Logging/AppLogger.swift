@@ -421,7 +421,9 @@ final class MainThreadWatchdog {
         // 卡过 10 秒基本没救了，抓一次主线程栈（SIGPROF），留给下次启动看
         if elapsed > 10 {
             ProgressRecorder.record("主线程卡死 \(Int(elapsed)) 秒，最后阶段：\(current)")
+            #if canImport(UIKit)
             CrashReporter.sampleMainThreadStack()
+            #endif
         }
     }
 }

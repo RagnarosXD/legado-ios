@@ -93,15 +93,7 @@ enum CrashReporter {
         mainThreadHandle = pthread_self()
         profHeaderCString = strdup("\n===== 主线程卡顿栈（SIGPROF 采样）=====\n--- backtrace ---\n")
         signal(SIGPROF) { _ in
-            let fd = logFileDescriptor
-            guard fd >= 0 else { return }
-            CrashReporter.writeCString(profHeaderCString, to: fd)
-            let count = backtrace(profFrames, Int32(profMaxFrames))
-            if count > 0 {
-                backtrace_symbols_fd(profFrames, count, fd)
-            }
-            CrashReporter.writeCString(tailCString, to: fd)
-            fsync(fd)
+            CrashReporter.writeProfSnapshot()
         }
 
         // 标脏：正常进入前台后由 markLaunchFinished 置为 false
@@ -121,6 +113,22 @@ enum CrashReporter {
         nameILLCString = strdup("SIGILL —— 非法指令")
         nameFPECString = strdup("SIGFPE —— 算术异常")
         nameTRAPCString = strdup("SIGTRAP —— 断点 / Swift 运行时 trap")
+    }
+
+    /// SIGPROF 处理体（必须是静态方法：signal 的 C 函数指针不能捕获上下文）
+    private static func writeProfSnapshot() {
+        let fd = logFileDescriptor
+        guard fd >= 0 else { return }
+
+        writeCString(profHeaderCString, to: fd)
+
+        let count = backtrace(profFrames, Int32(profMaxFrames))
+        if count > 0 {
+            backtrace_symbols_fd(profFrames, count, fd)
+        }
+
+        writeCString(tailCString, to: fd)
+        fsync(fd)
     }
 
     /// 让看门狗在主线程卡住时调用：给主线程发 SIGPROF，抓它当前的调用栈

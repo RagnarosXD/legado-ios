@@ -168,6 +168,7 @@ class SearchViewModel: ObservableObject {
         var failures: [String] = []
 
         AppLogger.info("Search", "开始搜索 keyword=\(keyword) 文本源=\(enabledSources.count) 跳过=\(skippedCount) 并发=\(limit)")
+        ProgressRecorder.record("开始搜索 keyword=\(keyword) 源数=\(enabledSources.count)")
 
         // 并发搜索：任务里通过 await 回到 MainActor 执行 searchInSource，
         // 耗时主要在 await 网络（此时主线程已释放），解析仍在主线程串行，
@@ -202,6 +203,7 @@ class SearchViewModel: ObservableObject {
                 running -= 1
                 searchedSourceCount += 1
                 MainThreadWatchdog.shared.beat("搜索结果 \(outcome.name)")
+                ProgressRecorder.record("搜索 \(outcome.name) 进度 \(searchedSourceCount)/\(totalSourceCount)")
 
                 if let failure = outcome.failure {
                     failures.append(failure)

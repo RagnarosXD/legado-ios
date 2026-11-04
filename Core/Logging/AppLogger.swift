@@ -80,8 +80,6 @@ final class AppLogger {
     /// O_APPEND 的 fd：与 CrashReporter 共享同一文件，两边都追加写
     private var fileDescriptor: Int32 = -1
     private var currentURL: URL?
-    /// 未刷盘的日志条数（只在 queue 上访问）
-    private var pendingWrites = 0
 
     /// DateFormatter 不是线程安全的，日志可能从任意线程写入，这里每次新建（开销可忽略）
     private static func makeFormatter() -> DateFormatter {
@@ -179,24 +177,16 @@ final class AppLogger {
 
         guard let data = (text + "\n").data(using: .utf8) else { return }
 
-        // 分级写盘策略（关键：不能让日志把主线程拖死）
-        // - WARN / ERROR：同步写 + fsync，保证崩溃前一定能看到错误
-        // - DEBUG / INFO：异步写 + 每 200 条 flush 一次
-        //   之前给每条日志都 fsync，搜索时 2000+ 条日志 × 1~5ms 会把主线程卡到 watchdog 杀进程
-        if level.rank >= Level.warn.rank {
-            queue.sync {
-                self.writeData(data)
-                self.flushFile()
-            }
-        } else {
-            queue.async {
-                self.writeData(data)
-                self.pendingWrites += 1
-                if self.pendingWrites >= 200 {
-                    self.flushFile()
-                    self.pendingWrites = 0
-                }
-            }
+        // 直接 write 到内核（O_APPEND 原子追加，约 10 微秒），不做 fsync。
+        // 原因：
+        // 1) write 进内核页缓存后，即使进程被 SIGKILL，数据也会由系统刷盘 —— 不会丢
+        // 2) 之前的 fsync（每条 1~5ms）会把主线程拖到 watchdog 杀进程
+        // 3) 之前的 queue.async 版本，进程被强杀时队列里的日志会丢失
+        // fd 是 Int32，读取是原子的；只在 deleteAllLogs 里重建
+        let fd = fileDescriptor
+        guard fd >= 0 else { return }
+        data.withUnsafeBytes { buffer in
+            Self.rawWrite(fd, buffer)
         }
     }
 
@@ -341,6 +331,35 @@ final class AppLogger {
     }
 }
 
+// MARK: - 当前处理进度（崩溃后下次启动能直接看到最后在干什么）
+
+/// 每次覆盖写一个极小文件：`Documents/Logs/state.txt`
+/// 用途：进程被 SIGKILL（watchdog / OOM / 手动划掉）时，信号处理不会执行，
+/// 但这个小文件始终反映「最后一步在做什么」，下次启动会把它打到日志开头。
+enum ProgressRecorder {
+
+    private static var fileURL: URL {
+        AppLogger.directory.appendingPathComponent("state.txt")
+    }
+
+    @inline(__always)
+    static func record(_ text: String) {
+        try? FileManager.default.createDirectory(at: AppLogger.directory, withIntermediateDirectories: true)
+        // 小文件覆盖写（临时文件 + rename），比日志写入更可靠地反映最新状态
+        try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    static func lastState() -> String? {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func clear() {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+}
+
 // MARK: - 主线程卡顿检测（避免新增文件需改 pbxproj）
 final class MainThreadWatchdog {
 
@@ -388,12 +407,12 @@ final class MainThreadWatchdog {
         let elapsed = Date().timeIntervalSince(lastBeat)
         let current = stage
         let alreadyReported = reported
-        if elapsed > 8 {
+        if elapsed > 5 {
             reported = true
         }
         lock.unlock()
 
-        guard elapsed > 8, !alreadyReported else { return }
+        guard elapsed > 5, !alreadyReported else { return }
 
         AppLogger.error("Watchdog", "主线程已卡住 \(Int(elapsed)) 秒，最后阶段：\(current)")
     }

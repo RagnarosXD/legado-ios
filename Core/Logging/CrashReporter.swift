@@ -50,8 +50,12 @@ enum CrashReporter {
 
         // 上次是否走到「正常进入前台」——没走到就当异常退出
         if UserDefaults.standard.bool(forKey: launchFlagKey) {
-            AppLogger.warn("Crash", "检测到上次未正常退出（被系统强杀时不会有 backtrace）")
+            // 被 SIGKILL（watchdog / OOM / 手动划掉）时信号处理不会执行，
+            // 靠这个小文件告诉用户「上次最后一步在做什么」
+            let lastState = ProgressRecorder.lastState() ?? "未知"
+            AppLogger.warn("Crash", "检测到上次未正常退出，最后状态：\(lastState)")
         }
+        ProgressRecorder.clear()
 
         // 旧版散落的 crash-*.log 合并进主日志（空文件直接删除）
         AppLogger.shared.mergeLegacyCrashReports()

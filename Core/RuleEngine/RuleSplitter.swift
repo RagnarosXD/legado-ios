@@ -569,6 +569,8 @@ enum JSONPathEvaluator {
         case wildcard
         case slice(Int?, Int?, Int?)
         case filter(String)
+        /// Jayway 函数：length() / size() / min() / max() / avg() / sum() / keys() / toNumber()
+        case function(String)
     }
 
     /// 返回所有命中的节点
@@ -627,6 +629,8 @@ enum JSONPathEvaluator {
 
                 if recursive {
                     tokens.append(.recursive(key.isEmpty ? nil : key))
+                } else if key.hasSuffix("()") {
+                    tokens.append(.function(String(key.dropLast(2)).lowercased()))
                 } else if !key.isEmpty {
                     tokens.append(.key(key))
                 }
@@ -747,7 +751,10 @@ enum JSONPathEvaluator {
                         }
                     }
 
-                case .filter(let expr):
+                case .function(let name):
+                results = applyFunction(name, to: results)
+
+            case .filter(let expr):
                     if let array = value as? [Any] {
                         next.append(contentsOf: array.filter { matches(filter: expr, item: $0) })
                     }
@@ -784,6 +791,55 @@ enum JSONPathEvaluator {
 
     // MARK: - 过滤器
 
+    /// Jayway 常用函数（对当前结果集求值）
+    private static func applyFunction(_ name: String, to values: [Any]) -> [Any] {
+        guard let first = values.first else { return [] }
+
+        switch name {
+        case "length", "size":
+            if let array = first as? [Any] { return [array.count] }
+            if let string = first as? String { return [string.count] }
+            if let dict = first as? [String: Any] { return [dict.count] }
+            return [values.count]
+
+        case "keys":
+            if let dict = first as? [String: Any] { return [Array(dict.keys)] }
+            return []
+
+        case "min", "max", "avg", "sum":
+            var numbers: [Double] = []
+
+            for value in values {
+                if let number = value as? NSNumber {
+                    numbers.append(number.doubleValue)
+                } else if let array = value as? [Any] {
+                    numbers.append(contentsOf: array.compactMap { ($0 as? NSNumber)?.doubleValue })
+                }
+            }
+
+            guard !numbers.isEmpty else { return [] }
+
+            switch name {
+            case "min": return [numbers.min() ?? 0]
+            case "max": return [numbers.max() ?? 0]
+            case "avg": return [numbers.reduce(0, +) / Double(numbers.count)]
+            default: return [numbers.reduce(0, +)]
+            }
+
+        case "tonumber":
+            for value in values {
+                if let string = value as? String, let number = Double(string) {
+                    return [number]
+                }
+                if let number = value as? NSNumber { return [number] }
+            }
+            return []
+
+        default:
+            return values
+        }
+    }
+
     private static func matches(filter: String, item: Any) -> Bool {
         var expr = filter.trimmingCharacters(in: .whitespaces)
         if expr.hasPrefix("?") { expr = String(expr.dropFirst()) }
@@ -802,6 +858,21 @@ enum JSONPathEvaluator {
         let andParts = RuleSplitter.splitTopLevel(expr, separator: "&&")
         if andParts.count > 1 {
             return andParts.allSatisfy { matches(filter: $0, item: item) }
+        }
+
+        // 正则匹配（Jayway：$.list[?(@.name =~ /关键字/)]）
+        if let range = expr.range(of: "=~") {
+            let lhs = String(expr[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            var rhs = String(expr[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+            if rhs.hasPrefix("/"), rhs.hasSuffix("/"), rhs.count >= 2 {
+                rhs = String(rhs.dropFirst().dropLast())
+            }
+            rhs = unquote(rhs)
+
+            guard let leftValue = resolveOperand(lhs, item: item) else { return false }
+            let leftText = stringValue(leftValue)
+            return leftText.range(of: rhs, options: .regularExpression) != nil
         }
 
         for op in ["==", "!=", ">=", "<=", ">", "<"] {

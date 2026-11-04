@@ -175,12 +175,18 @@ class AnalyzeUrl {
             }
         }
         
-        // 10. 合并书源 headers
-        if let source = source, let headerStr = source.header,
-           let data = headerStr.data(using: .utf8),
-           let sourceHeaders = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
-            for (key, value) in sourceHeaders where result.headers[key] == nil {
-                result.headers[key] = replaceVariables(value, context: templateContext)
+        // 10. 合并书源 headers（对齐 Android BaseSource.getHeaderMap：
+        //     header 字段可以是 <js>…</js> / @js:… 动态生成，解析失败只记日志不中断请求）
+        if let source = source, let headerStr = source.header, !headerStr.isEmpty {
+            let resolved = resolveHeaderRule(headerStr, source: source, baseUrl: urlPart)
+
+            if let data = resolved.data(using: .utf8),
+               let sourceHeaders = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+                for (key, value) in sourceHeaders where result.headers[key] == nil {
+                    result.headers[key] = replaceVariables(value, context: templateContext)
+                }
+            } else {
+                AppLogger.warn("AnalyzeUrl", "\(source.bookSourceName) header 解析失败，已忽略：\(resolved.prefix(120))")
             }
         }
         
@@ -193,6 +199,47 @@ class AnalyzeUrl {
         return result
     }
     
+    // MARK: - 书源 header 的动态 JS（Android BaseSource.getHeaderMap）
+
+    /// 支持三种写法：
+    /// 1. 整体是 JS：`<js>JSON.stringify({...})</js>` 或 `@js:...`
+    /// 2. 值内嵌 JS：`{"X-Sign":"<js>java.md5(...)</js>"}`
+    /// 3. 普通 JSON 字符串（原样返回）
+    static func resolveHeaderRule(_ header: String, source: BookSource?, baseUrl: String?) -> String {
+        let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return header }
+
+        let lowered = trimmed.lowercased()
+
+        // 情况 1：整条 header 就是脚本
+        if lowered.hasPrefix("<js>") || lowered.hasPrefix("@js:") {
+            return analyzeJS(trimmed, source: source, baseUrl: baseUrl)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // 情况 3：不含 JS，直接返回
+        guard lowered.contains("<js>") || lowered.contains("@js:") else { return trimmed }
+
+        // 情况 2：逐值求值
+        if let data = trimmed.data(using: .utf8),
+           var parsed = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            for (key, value) in parsed {
+                let valueLowered = value.lowercased()
+                guard valueLowered.contains("<js>") || valueLowered.hasPrefix("@js:") else { continue }
+                parsed[key] = analyzeJS(value, source: source, baseUrl: baseUrl)
+            }
+
+            if let encoded = try? JSONSerialization.data(withJSONObject: parsed),
+               let text = String(data: encoded, encoding: .utf8) {
+                return text
+            }
+            return trimmed
+        }
+
+        // 结构不是合法 JSON：整条当脚本执行
+        return analyzeJS(trimmed, source: source, baseUrl: baseUrl)
+    }
+
     // MARK: - URL 级 JS（Android analyzeJs）
 
     private static let jsEngine = RuleEngine()

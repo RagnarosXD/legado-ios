@@ -8,6 +8,7 @@
 import SwiftUI
 import Network
 import CoreText
+import WebKit
 import UniformTypeIdentifiers
 
 struct MainTabView: View {
@@ -1329,5 +1330,129 @@ enum FontImporter {
         let display = CTFontCopyFullName(font) as String
 
         return ImportedFont(postScript: postScript, display: display)
+    }
+}
+
+// MARK: - 后台 WebView 抓取（对齐 Android java.webView）
+
+final class WebViewFetcher {
+
+    static let shared = WebViewFetcher()
+
+    /// 同步抓取：在主线程泵 runloop 等待 WKWebView 加载完成
+    /// - Parameters:
+    ///   - url: 目标地址
+    ///   - script: 加载完成后执行的 JS（为空则返回 outerHTML）
+    ///   - timeout: 最长等待秒数（Android 侧同样会阻塞）
+    func fetch(url: String, script: String? = nil, timeout: TimeInterval = 6) -> String {
+        guard let target = URL(string: url), !url.isEmpty else { return "" }
+
+        var result = ""
+        var finished = false
+        let lock = NSLock()
+
+        let begin = {
+            let config = WKWebViewConfiguration()
+            config.websiteDataStore = .default()
+            let webView = WKWebView(
+                frame: CGRect(x: 0, y: 0, width: 400, height: 800),
+                configuration: config
+            )
+
+            let delegate = WebViewCaptureDelegate(script: script) { value in
+                lock.lock()
+                if !finished {
+                    result = value
+                    finished = true
+                }
+                lock.unlock()
+            }
+
+            WebViewCaptureDelegate.retain(delegate, for: webView)
+            webView.navigationDelegate = delegate
+            webView.load(URLRequest(url: target, timeoutInterval: timeout))
+        }
+
+        let startedAt = Date()
+
+        if Thread.isMainThread {
+            begin()
+            let deadline = Date().addingTimeInterval(timeout)
+            while !finished, Date() < deadline {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+            }
+        } else {
+            DispatchQueue.main.async(execute: begin)
+            let deadline = Date().addingTimeInterval(timeout)
+            while !finished, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+
+        lock.lock()
+        let value = result
+        lock.unlock()
+
+        let elapsed = Date().timeIntervalSince(startedAt)
+        if value.isEmpty {
+            AppLogger.warn("WebView", "抓取失败或超时 \(String(format: "%.1f", elapsed))s url=\(url.prefix(120))")
+        } else {
+            AppLogger.info("WebView", "抓取完成 \(String(format: "%.1f", elapsed))s len=\(value.count) url=\(url.prefix(120))")
+        }
+
+        return value
+    }
+}
+
+final class WebViewCaptureDelegate: NSObject, WKNavigationDelegate {
+
+    private let script: String?
+    private let completion: (String) -> Void
+
+    private static var retained: [ObjectIdentifier: WebViewCaptureDelegate] = [:]
+    private static let lock = NSLock()
+
+    init(script: String?, completion: @escaping (String) -> Void) {
+        self.script = script
+        self.completion = completion
+        super.init()
+    }
+
+    static func retain(_ delegate: WebViewCaptureDelegate, for webView: WKWebView) {
+        lock.lock()
+        retained[ObjectIdentifier(webView)] = delegate
+        lock.unlock()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let js = (script?.isEmpty == false ? script! : "document.documentElement.outerHTML")
+
+        webView.evaluateJavaScript(js) { [weak self] value, error in
+            guard let self else { return }
+
+            if let error {
+                AppLogger.warn("WebView", "执行 JS 失败：\(error.localizedDescription)")
+            }
+            self.completion((value as? String) ?? "")
+            Self.release(webView)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        AppLogger.warn("WebView", "加载失败：\(error.localizedDescription)")
+        completion("")
+        Self.release(webView)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        AppLogger.warn("WebView", "加载失败(provisional)：\(error.localizedDescription)")
+        completion("")
+        Self.release(webView)
+    }
+
+    private static func release(_ webView: WKWebView) {
+        lock.lock()
+        retained.removeValue(forKey: ObjectIdentifier(webView))
+        lock.unlock()
     }
 }

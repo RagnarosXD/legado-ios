@@ -631,6 +631,32 @@ extension JSBridge {
         }
         javaObject.setObject(deleteFileBlock, forKeyedSubscript: "deleteFile" as NSString)
 
+        // WebView 抓取依赖 WKWebView，仅 iOS 提供
+#if os(iOS)
+        // 后台 WebView 抓取（对齐 Android java.webView）
+        let webViewBlock: @convention(block) (String, String, String) -> String = { html, url, js in
+            guard NetworkMonitor.shared.isConnected else {
+                AppLogger.warn("WebView", "离线，跳过 webView 抓取")
+                return ""
+            }
+            guard !url.isEmpty else { return html }
+            return WebViewFetcher.shared.fetch(url: url, script: js.isEmpty ? nil : js)
+        }
+        javaObject.setObject(webViewBlock, forKeyedSubscript: "__webView" as NSString)
+
+        let webViewSourceBlock: @convention(block) (String, String) -> String = { url, js in
+            guard NetworkMonitor.shared.isConnected, !url.isEmpty else { return "" }
+            return WebViewFetcher.shared.fetch(url: url, script: js.isEmpty ? nil : js)
+        }
+        javaObject.setObject(webViewSourceBlock, forKeyedSubscript: "__webViewGetSource" as NSString)
+
+        let webViewUABlock: @convention(block) () -> String = {
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        }
+        javaObject.setObject(webViewUABlock, forKeyedSubscript: "getWebViewUA" as NSString)
+
+#endif
+
         // JS 包装：getStringList / getElement 复用 __getElements
         _ = context?.jsContext?.evaluateScript(
             """
@@ -646,6 +672,12 @@ extension JSBridge {
                     try { var list = JSON.parse(raw); return list.length ? list[0] : null; } catch (e) { return null; }
                 };
                 java.logType = function (value) { java.__logType(s(value)); };
+                java.webView = function (html, url, js) {
+                    return java.__webView(s(html), s(url), s(js));
+                };
+                java.webViewGetSource = function (url, js) {
+                    return java.__webViewGetSource(s(url), s(js));
+                };
                 java.strToBytes = function (text) {
                     try { return JSON.parse(java.__strToBytes(s(text))); } catch (e) { return []; }
                 };

@@ -268,3 +268,35 @@
 - `响应 status=403` → 站点拒绝（可能需要 Cookie/Referer）
 - `解析失败，响应片段：<html>...` → 返回的不是书源 JSON
 - `订阅地址不合法` → 订阅 URL 不是 http/https
+---
+
+## 十四、订阅更新失败修复（第二轮，1.3.44）
+
+真机日志（1.3.43）暴露了真正原因：
+
+```
+请求 https://www.yckceo.com/yuedu/shuyuans/json/id/1330.json
+请求失败 err=请求超时 code=-1001            ← 20s 不够（文件 7.8MB）
+响应 status=200 bytes=7857616               ← 第二次请求成功
+解析失败，响应片段：[ { "bookSourceComment": ... "bookSourceUrl": "https://www.sou78.com/" ...
+```
+
+### 根因
+
+| # | 问题 | 说明 |
+| --- | --- | --- |
+| 1 | **`ExportableSource` 的 `bookSourceUrl` / `bookSourceName` 是 `let` 非可选** | 订阅里只要有一源缺这两个字段（或类型不符），整个 800 源的数组解码就整体失败 |
+| 2 | 嵌套规则（`ruleSearch` 等）解码失败会抛出 | 某个源的规则结构与 iOS 模型不完全兼容 → 整个数组失败 |
+| 3 | 超时 20 秒不足 | 该订阅 7.8MB，第一次请求直接 -1001 超时 |
+| 4 | 一次 `decode([ExportableSource].self)` 无法定位坏源 | `try?` 吞掉 `DecodingError`，日志里只知道「解析失败」 |
+
+### 修复
+
+| # | 修复 |
+| --- | --- |
+| 1 | 自定义**宽松解码** `init(from:)`：所有字段 `decodeIfPresent` + 类型兜底（数字↔字符串↔布尔互转），`bookSourceUrl`/`bookSourceName` 缺失时用空串 |
+| 2 | 嵌套规则解码失败只置 `nil`，**只影响该源的规则，不抛错** |
+| 3 | `fetchSources` 改为**逐条解码**：`JSONSerialization` 取数组 → 每条单独 `decode` → 坏源跳过并记录序号与原因，好源照常导入 |
+| 4 | 超时 20s → **45s** |
+| 5 | 并发诊断：`updateAllSubscriptions` 打印管理器实例标识，若出现两个不同 id 说明单例被重复创建 |
+| 6 | 已在执行时打印「已有更新任务在执行，忽略本次触发」，便于确认重复点击/启动自动更新是否叠加 |

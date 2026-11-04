@@ -133,7 +133,15 @@ class SourceSubscriptionManager: ObservableObject {
     /// 更新所有需要更新的订阅
     /// 进度按「订阅 × 阶段」折算：下载 0~15%、解析 15~30%、导入 30~100%
     func updateAllSubscriptions() async {
-        guard !isUpdating else { return }
+        guard !isUpdating else {
+            AppLogger.info("Subscription", "已有更新任务在执行，忽略本次触发")
+            return
+        }
+
+        AppLogger.info(
+            "Subscription",
+            "管理器实例 \(String(UInt(bitPattern: ObjectIdentifier(self).hashValue), radix: 16)) 开始执行"
+        )
 
         isUpdating = true
         updateProgress = 0
@@ -240,7 +248,8 @@ class SourceSubscriptionManager: ObservableObject {
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        // 订阅文件可能达数 MB（800+ 源），20 秒不够
+        request.timeoutInterval = 45
         request.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
         // 不少订阅托管在 CDN 上，会用 UA 拦默认客户端
         request.setValue(
@@ -270,10 +279,38 @@ class SourceSubscriptionManager: ObservableObject {
             throw SubscriptionError.networkError
         }
         
-        // 尝试解析为 JSON 数组
-        if let sources = try? JSONDecoder().decode([ExportableSource].self, from: data) {
-            AppLogger.info("Subscription", "解析成功（JSON 数组）\(sources.count) 个")
-            return sources
+        // 逐条解码：订阅里常有少量格式不兼容的源，
+        // 单条失败只跳过它，不要让整批 800 个源全部失败
+        if let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any], !array.isEmpty {
+            var parsed: [ExportableSource] = []
+            var failed: [String] = []
+
+            for (index, item) in array.enumerated() {
+                guard JSONSerialization.isValidJSONObject(item),
+                      let itemData = try? JSONSerialization.data(withJSONObject: item) else {
+                    failed.append("#\(index): 非法 JSON 对象")
+                    continue
+                }
+
+                do {
+                    parsed.append(try JSONDecoder().decode(ExportableSource.self, from: itemData))
+                } catch {
+                    failed.append("#\(index): \(error)")
+                    if failed.count <= 3 {
+                        AppLogger.error("Subscription", "第 \(index) 条解码失败：\(error)")
+                    }
+                }
+            }
+
+            if !parsed.isEmpty {
+                AppLogger.info(
+                    "Subscription",
+                    "解析成功 \(parsed.count) 个，跳过 \(failed.count) 个不兼容"
+                )
+                return parsed
+            }
+
+            AppLogger.error("Subscription", "全部 \(array.count) 条均解码失败")
         }
         
         // 尝试解析为 JSON Lines 格式
@@ -453,6 +490,83 @@ struct ExportableSource: Codable {
     var ruleToc: BookSource.TocRule?
     var ruleContent: BookSource.ContentRule?
     
+    enum CodingKeys: String, CodingKey {
+        case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookUrlPattern
+        case header, concurrentRate, loginUrl, loginUi, loginCheckJs, jsLib, coverDecodeJs
+        case variableComment, bookSourceComment, enabledCookieJar
+        case searchUrl, exploreUrl, enabled, enabledExplore, weight, customOrder, respondTime, lastUpdateTime
+        case ruleReview, ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent
+    }
+
+    /// 宽松解码：订阅文件里常有少量「字段缺失 / 类型不符 / 规则结构不兼容」的源，
+    /// 不能让一个坏源导致整批失败（Android 的 GSON 同样是容错的）
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        bookSourceUrl = Self.text(c, .bookSourceUrl) ?? ""
+        bookSourceName = Self.text(c, .bookSourceName) ?? ""
+        bookSourceGroup = Self.text(c, .bookSourceGroup)
+        bookSourceType = Self.number(c, .bookSourceType)
+        bookUrlPattern = Self.text(c, .bookUrlPattern)
+        header = Self.text(c, .header)
+        concurrentRate = Self.text(c, .concurrentRate)
+        loginUrl = Self.text(c, .loginUrl)
+        loginUi = Self.text(c, .loginUi)
+        loginCheckJs = Self.text(c, .loginCheckJs)
+        jsLib = Self.text(c, .jsLib)
+        coverDecodeJs = Self.text(c, .coverDecodeJs)
+        variableComment = Self.text(c, .variableComment)
+        bookSourceComment = Self.text(c, .bookSourceComment)
+        enabledCookieJar = Self.flag(c, .enabledCookieJar)
+        searchUrl = Self.text(c, .searchUrl)
+        exploreUrl = Self.text(c, .exploreUrl)
+        enabled = Self.flag(c, .enabled)
+        enabledExplore = Self.flag(c, .enabledExplore)
+        weight = Self.number(c, .weight)
+        customOrder = Self.number(c, .customOrder)
+        respondTime = Self.number(c, .respondTime)
+        lastUpdateTime = Self.number(c, .lastUpdateTime)
+        ruleReview = Self.text(c, .ruleReview)
+
+        // 规则结构不兼容时置 nil，只影响该源的规则，不影响其它源
+        ruleSearch = Self.value(c, .ruleSearch, BookSource.SearchRule.self)
+        ruleExplore = Self.value(c, .ruleExplore, BookSource.ExploreRule.self)
+        ruleBookInfo = Self.value(c, .ruleBookInfo, BookSource.BookInfoRule.self)
+        ruleToc = Self.value(c, .ruleToc, BookSource.TocRule.self)
+        ruleContent = Self.value(c, .ruleContent, BookSource.ContentRule.self)
+    }
+
+    private static func text(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
+        if let value = (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil { return value }
+        if let number = (try? c.decodeIfPresent(Int.self, forKey: key)) ?? nil { return String(number) }
+        if let flag = (try? c.decodeIfPresent(Bool.self, forKey: key)) ?? nil { return flag ? "true" : "false" }
+        return nil
+    }
+
+    private static func number(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Int? {
+        if let value = (try? c.decodeIfPresent(Int.self, forKey: key)) ?? nil { return value }
+        if let double = (try? c.decodeIfPresent(Double.self, forKey: key)) ?? nil { return Int(double) }
+        if let text = (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil { return Int(text) }
+        return nil
+    }
+
+    private static func flag(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Bool? {
+        if let value = (try? c.decodeIfPresent(Bool.self, forKey: key)) ?? nil { return value }
+        if let number = (try? c.decodeIfPresent(Int.self, forKey: key)) ?? nil { return number != 0 }
+        if let text = (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil {
+            return text == "true" || text == "1"
+        }
+        return nil
+    }
+
+    private static func value<T: Decodable>(
+        _ c: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys,
+        _ type: T.Type
+    ) -> T? {
+        (try? c.decodeIfPresent(type, forKey: key)) ?? nil
+    }
+
     init(from source: BookSource) {
         self.bookSourceUrl = source.bookSourceUrl
         self.bookSourceName = source.bookSourceName

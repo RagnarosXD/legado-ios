@@ -258,3 +258,14 @@ WebDAV 备份/恢复/增量同步、本地备份导入导出、阅读统计基�
 - 书源订阅定时更新
 - 九宫格手势动作自定义
 - 音量键翻页（iOS 无公开 API，跳过）
+## 十四、P4 收尾（1.3.31）
+
+| 项 | 内容 |
+| --- | --- |
+| TXT 分卷 | `LocalBookParser.isVolumeHeading` 识别「第X卷 / 卷X / 第X部」，卷标题独立成条（`isVolume = true`、不进正文）；落库写入 `BookChapter.isVolume`，目录显示为卷头 |
+| 订阅自动更新 | `SourceSubscriptionManager.shared` + App 启动时检查 `needsUpdate`（仅到期订阅才请求，避免每次启动拉取） |
+| 点击翻页区 | 三种预设：九宫格（默认，对齐 Android `setRect9x`）、左中右三栏、上下两半 |
+
+### P4 完成度：约 98%
+
+剩余未做：音量键翻页（iOS 无公开 API）、`java.webView` 类源能力（属 P1 范围）。

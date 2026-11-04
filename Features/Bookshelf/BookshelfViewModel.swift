@@ -190,6 +190,92 @@ final class BookshelfViewModel: ObservableObject {
         Task { await loadBooks() }
     }
     
+    /// 全部分组（含隐藏，用于管理页）
+    @Published var allGroups: [BookGroup] = []
+
+    func loadAllGroups() {
+        let request: NSFetchRequest<BookGroup> = BookGroup.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+        allGroups = (try? CoreDataStack.shared.viewContext.fetch(request)) ?? []
+    }
+
+    func createGroup(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let context = CoreDataStack.shared.viewContext
+        let group = BookGroup.create(in: context, groupName: trimmed)
+        group.order = Int32((allGroups.map { $0.order }.max() ?? 0) + 1)
+        group.show = true
+
+        try? CoreDataStack.shared.save()
+        loadAllGroups()
+        loadGroups()
+        AppLogger.info("Bookshelf", "新建分组 \(trimmed)")
+    }
+
+    func renameGroup(_ group: BookGroup, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        group.groupName = trimmed
+        try? CoreDataStack.shared.save()
+        loadAllGroups()
+        loadGroups()
+    }
+
+    /// 删除分组：同时把书籍上对应的位掩码清掉
+    func deleteGroup(_ group: BookGroup) {
+        let context = CoreDataStack.shared.viewContext
+        let gid = group.groupId
+
+        let request: NSFetchRequest<Book> = Book.fetchRequest()
+        if let books = try? context.fetch(request) {
+            for book in books where (book.group & gid) != 0 {
+                book.group = book.group & ~gid
+            }
+        }
+
+        context.delete(group)
+        try? CoreDataStack.shared.save()
+
+        loadAllGroups()
+        loadGroups()
+        Task { await loadBooks() }
+        AppLogger.info("Bookshelf", "删除分组 \(group.groupName)")
+    }
+
+    func moveGroups(from source: IndexSet, to destination: Int) {
+        var ordered = allGroups
+        ordered.move(fromOffsets: source, toOffset: destination)
+
+        for (index, group) in ordered.enumerated() {
+            group.order = Int32(index)
+        }
+        try? CoreDataStack.shared.save()
+
+        loadAllGroups()
+        loadGroups()
+    }
+
+    func setVisible(_ group: BookGroup, visible: Bool) {
+        group.show = visible
+        try? CoreDataStack.shared.save()
+
+        loadAllGroups()
+        loadGroups()
+        if selectedGroupId == group.groupId, !visible {
+            selectGroup(nil)
+        }
+    }
+
+    /// 分组内的书籍数量（位掩码语义，谓词表达不了，取全量后统计）
+    func bookCount(for groupId: Int64) -> Int {
+        let request: NSFetchRequest<Book> = Book.fetchRequest()
+        let all = (try? CoreDataStack.shared.viewContext.fetch(request)) ?? []
+        return all.filter { ($0.group & groupId) > 0 }.count
+    }
+
     /// 读取可见分组（Android BookGroup.show + order）
     func loadGroups() {
         let request: NSFetchRequest<BookGroup> = BookGroup.fetchRequest()

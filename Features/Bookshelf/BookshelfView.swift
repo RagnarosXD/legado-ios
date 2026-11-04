@@ -25,6 +25,7 @@ struct BookshelfView: View {
     @AppStorage("bookshelfColumns") private var columns: Int = 3
     /// 是否显示书名（对齐 Android showBookname）
     @AppStorage("bookshelfShowName") private var showBookName: Bool = true
+    @State private var showingGroupManage = false
     
     var body: some View {
         Group {
@@ -49,6 +50,9 @@ struct BookshelfView: View {
             if isSelecting {
                 batchBar
             }
+        }
+        .sheet(isPresented: $showingGroupManage) {
+            GroupManageView(viewModel: viewModel)
         }
         .confirmationDialog("加入分组", isPresented: $showingGroupPicker, titleVisibility: .visible) {
             ForEach(viewModel.groups, id: \.groupId) { group in
@@ -205,6 +209,17 @@ ToolbarItem(placement: .navigationBarTrailing) {
                 ForEach(viewModel.groups, id: \.groupId) { group in
                     groupChip(title: group.groupName, id: group.groupId)
                 }
+
+                Button {
+                    showingGroupManage = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color(.secondarySystemBackground)))
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -583,4 +598,105 @@ struct EmptyStateView: View {
 // MARK: - 预览
 #Preview {
     BookshelfView()
+}
+
+// MARK: - 分组管理（对齐 Android GroupManageActivity）
+
+struct GroupManageView: View {
+
+    @ObservedObject var viewModel: BookshelfViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newName = ""
+    @State private var editingGroup: BookGroup?
+    @State private var editingName = ""
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("新建分组") {
+                    HStack {
+                        TextField("分组名称", text: $newName)
+                            .textInputAutocapitalization(.never)
+
+                        Button("添加") {
+                            viewModel.createGroup(newName)
+                            newName = ""
+                        }
+                        .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+
+                Section("分组") {
+                    ForEach(viewModel.allGroups, id: \.groupId) { group in
+                        HStack {
+                            Text(group.groupName)
+
+                            Spacer()
+
+                            Text("\(viewModel.bookCount(for: group.groupId))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Toggle("", isOn: Binding(
+                                get: { group.show },
+                                set: { viewModel.setVisible(group, visible: $0) }
+                            ))
+                            .labelsHidden()
+                        }
+                        .contextMenu {
+                            Button {
+                                editingGroup = group
+                                editingName = group.groupName
+                            } label: {
+                                Label("重命名", systemImage: "pencil")
+                            }
+
+                            Button(role: .destructive) {
+                                viewModel.deleteGroup(group)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                    .onMove { source, destination in
+                        viewModel.moveGroups(from: source, to: destination)
+                    }
+                }
+
+                Section {
+                    Text("拖动可调整分组顺序；关闭开关后该分组不在书架顶部显示，但书籍仍保留归属。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("分组管理")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    EditButton()
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .alert("重命名分组", isPresented: Binding(
+                get: { editingGroup != nil },
+                set: { if !$0 { editingGroup = nil } }
+            )) {
+                TextField("名称", text: $editingName)
+
+                Button("确定") {
+                    if let group = editingGroup {
+                        viewModel.renameGroup(group, to: editingName)
+                    }
+                    editingGroup = nil
+                }
+                Button("取消", role: .cancel) { editingGroup = nil }
+            }
+        }
+        .task {
+            viewModel.loadAllGroups()
+        }
+    }
 }

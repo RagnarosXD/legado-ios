@@ -918,7 +918,7 @@ private struct ExploreSourceRow: View {
             if expanded {
                 let kinds = source.exploreKinds
                 if kinds.isEmpty {
-                    Text("该源的 exploreUrl 需要 JS 生成，暂不支持")
+                    Text("该源未提供可用的发现分类")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 } else {

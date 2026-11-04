@@ -339,17 +339,72 @@ extension BookSource {
     }
 
     /// 解析 exploreUrl：`名称::地址` 用 `&&` 或换行分隔；
-    /// `@js:` / `<js>` 形式需要 JS 引擎，暂返回空
+    /// 支持 `@js:` / `<js>` 动态生成（对齐 Android BookSource.exploreKinds）
     var exploreKinds: [ExploreKindItem] {
+        let raw = resolveExploreUrl()
+        guard !raw.isEmpty else { return [] }
+        return Self.parseKinds(raw)
+    }
+
+    /// exploreUrl 若是脚本则执行一次并缓存（列表滚动时不会反复求值）
+    private func resolveExploreUrl() -> String {
         guard let raw = exploreUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return []
+            return ""
         }
 
         let lowered = raw.lowercased()
-        if lowered.hasPrefix("@js:") || lowered.contains("<js>") {
-            return []
+        guard lowered.hasPrefix("@js:") || lowered.contains("<js>") else { return raw }
+
+        if let cached = ExploreKindCache.shared.value(for: bookSourceUrl) {
+            return cached
         }
 
+        let evaluated = Self.evaluateExploreJS(raw, source: self)
+        if !evaluated.isEmpty {
+            ExploreKindCache.shared.store(evaluated, for: bookSourceUrl)
+        }
+        return evaluated
+    }
+
+    private static func evaluateExploreJS(_ rule: String, source: BookSource) -> String {
+        let lowered = rule.lowercased()
+
+        let script: String
+        if lowered.hasPrefix("@js:") {
+            script = String(rule.dropFirst(4))
+        } else if let start = lowered.range(of: "<js>"),
+                  let end = lowered.range(of: "</js>", range: start.upperBound..<lowered.endIndex) {
+            let lower = rule.startIndex
+            let from = rule.index(lower, offsetBy: lowered.distance(from: lowered.startIndex, to: start.upperBound))
+            let to = rule.index(lower, offsetBy: lowered.distance(from: lowered.startIndex, to: end.lowerBound))
+            script = String(rule[from..<to])
+        } else {
+            return ""
+        }
+
+        let context = ExecutionContext()
+        context.source = source
+        context.baseURL = URL(string: source.bookSourceUrl)
+
+        let bridge = JSBridge()
+        bridge.context = context
+
+        guard let jsContext = JSContext() else { return "" }
+        bridge.inject(into: jsContext)
+        jsContext.setObject(source.bookSourceUrl, forKeyedSubscript: "baseUrl" as NSString)
+        jsContext.setObject(source.bookSourceUrl, forKeyedSubscript: "result" as NSString)
+
+        guard let value = jsContext.evaluateScript(script), !value.isUndefined, !value.isNull else {
+            return ""
+        }
+
+        let text = (value.toString() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        AppLogger.info("Explore", "\(source.bookSourceName) exploreUrl 脚本返回 \(text.count) 字符")
+        return text
+    }
+
+    /// 解析 `名称::地址&&名称2::地址2`（也支持换行分隔）
+    static func parseKinds(_ raw: String) -> [ExploreKindItem] {
         var items: [ExploreKindItem] = []
 
         for line in raw.components(separatedBy: "\n") {
@@ -371,6 +426,34 @@ extension BookSource {
         }
 
         return items
+    }
+}
+
+// MARK: - 发现分类缓存
+
+final class ExploreKindCache {
+
+    static let shared = ExploreKindCache()
+
+    private var storage: [String: String] = [:]
+    private let lock = NSLock()
+
+    func value(for key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func store(_ value: String, for key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[key] = value
+    }
+
+    func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeAll()
     }
 }
 

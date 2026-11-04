@@ -489,6 +489,55 @@ class RuleEngine {
         return try getHtmlElements(ruleStr: rule, body: body, baseUrl: baseUrl)
     }
     
+    /// 在 XPath 命中节点的范围内执行「简单选择器 @ 取值」（Kanna CSS）
+    /// 返回 nil 表示规则不适用，调用方回退到原有字符串解析
+    private func selectScopedInXPathNode(
+        ruleStr: String,
+        node: XMLElement,
+        baseUrl: String?
+    ) -> String? {
+        let rule = ruleStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rule.isEmpty, !rule.hasPrefix("-"), !rule.hasPrefix("+") else { return nil }
+
+        // 只处理两段式：selector@attr
+        guard let atIndex = rule.lastIndex(of: "@") else { return nil }
+
+        let selector = String(rule[..<atIndex]).trimmingCharacters(in: .whitespaces)
+        let attr = String(rule[rule.index(after: atIndex)...]).trimmingCharacters(in: .whitespaces)
+
+        guard !selector.isEmpty, !attr.isEmpty, !attr.contains(" ") else { return nil }
+
+        // 复杂语法（索引 / 方括号 / 组合符 / JS / 正则替换 / 转义）回退原实现
+        let allowedSelector = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._#> -"
+        )
+        guard selector.unicodeScalars.allSatisfy({ allowedSelector.contains($0) }) else { return nil }
+
+        let allowedAttr = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+        )
+        guard attr.unicodeScalars.allSatisfy({ allowedAttr.contains($0) }) else { return nil }
+
+        var matched: [XMLElement] = []
+        for item in node.css(selector) {
+            matched.append(item)
+        }
+
+        // 没有命中时交回原逻辑（可能规则里还有别的语义）
+        guard let first = matched.first else { return nil }
+
+        switch attr.lowercased() {
+        case "text", "owntext":
+            return first.text ?? ""
+
+        case "html", "outerhtml", "all", "innerhtml":
+            return first.toHTML ?? ""
+
+        default:
+            return first[attr] ?? ""
+        }
+    }
+
     /// 从 HTML 用 XPath 提取元素列表
     private func getXPathElements(xpath: String, body: String, baseUrl: String?) throws -> [ElementContext] {
         guard XPathParser.isSafe(xpath) else {
@@ -619,12 +668,56 @@ class RuleEngine {
     /// `@json:`、`@js:`、`<js>`、`&&`、`||`、`%%`、`@put/@get`、`class.xxx` 语法全部生效。
     ///
     /// - Parameter joinAll: true 时把多条命中结果按行拼接（正文规则），false 时取第一条非空（书名/作者等字段）
+    /// 取值统一入口（对齐 Android `AnalyzeRule.getString(..., isUrl, ...)`）
+    /// - Parameter isUrl: true 时按 URL 语义处理：空 → baseUrl，非空 → 绝对化，`javascript:`/`about:` → 空
     func getString(ruleStr: String?,
+                   elementContext: ElementContext,
+                   baseUrl: String? = nil,
+                   joinAll: Bool = false,
+                   isUrl: Bool = false) -> String {
+        let raw = getStringRaw(
+            ruleStr: ruleStr,
+            elementContext: elementContext,
+            baseUrl: baseUrl,
+            joinAll: joinAll
+        )
+
+        guard isUrl else { return raw }
+        return Self.absoluteURL(raw, base: baseUrl ?? elementContext.baseUrl)
+    }
+
+    /// 对齐 Android `getAbsoluteURL`：相对地址按 base 补全，空值回落 base
+    static func absoluteURL(_ value: String, base: String?) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+
+        // 伪协议不是可用地址，直接置空（Android NetworkUtils.getAbsoluteURL 同样返回空）
+        if lowered.hasPrefix("javascript:") || lowered.hasPrefix("about:") {
+            return ""
+        }
+
+        if trimmed.isEmpty {
+            return base ?? ""
+        }
+
+        guard let base, !base.isEmpty else { return trimmed }
+        return WebBook.normalizeURL(trimmed, base: base)
+    }
+
+    /// 原取值实现（不含 isUrl 处理）
+    private func getStringRaw(ruleStr: String?,
                    elementContext: ElementContext,
                    baseUrl: String? = nil,
                    joinAll: Bool = false) -> String {
         guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
+        }
+
+        // XPath 命中节点：优先在该节点范围内执行 CSS 子规则，
+        // 避免把节点 HTML 重新 parse（表格/嵌套结构会变形）
+        if let node = elementContext.xpathNode,
+           let scoped = selectScopedInXPathNode(ruleStr: ruleStr, node: node, baseUrl: baseUrl) {
+            return scoped
         }
 
         let context = ExecutionContext()

@@ -248,14 +248,22 @@ class WebBook {
             if !parsed.isEmpty { book.intro = parsed }
         }
         if let coverUrl = infoRule.coverUrl {
-            let parsed = ruleEngine.getString(ruleStr: coverUrl, elementContext: elementCtx, baseUrl: redirectUrl)
-            // 对齐 Android 的 isUrl 语义：相对地址按当前页面补全
-            if !parsed.isEmpty { book.coverUrl = normalizeURL(parsed, base: redirectUrl) }
+            let parsed = ruleEngine.getString(
+                ruleStr: coverUrl,
+                elementContext: elementCtx,
+                baseUrl: redirectUrl,
+                isUrl: true
+            )
+            if !parsed.isEmpty { book.coverUrl = parsed }
         }
         if let tocUrl = infoRule.tocUrl {
-            let parsed = ruleEngine.getString(ruleStr: tocUrl, elementContext: elementCtx, baseUrl: redirectUrl)
-            // 对齐 Android BookInfo：tocUrl 解析为空时回落详情页地址
-            book.tocUrl = parsed.isEmpty ? redirectUrl : parsed
+            // isUrl 语义下空值自动回落详情页地址
+            book.tocUrl = ruleEngine.getString(
+                ruleStr: tocUrl,
+                elementContext: elementCtx,
+                baseUrl: redirectUrl,
+                isUrl: true
+            )
         }
         if let lastChapter = infoRule.lastChapter {
             let parsed = ruleEngine.getString(ruleStr: lastChapter, elementContext: elementCtx, baseUrl: redirectUrl)
@@ -312,11 +320,17 @@ class WebBook {
             var link = ruleEngine.getString(
                 ruleStr: tocRule.chapterUrl,
                 elementContext: elementCtx,
-                baseUrl: redirectUrl
+                baseUrl: redirectUrl,
+                isUrl: true
             )
             if link.isEmpty {
                 // Legado 的默认行为：章节链接取当前元素的 href
-                link = ruleEngine.getString(ruleStr: "@href", elementContext: elementCtx, baseUrl: redirectUrl)
+                link = ruleEngine.getString(
+                    ruleStr: "@href",
+                    elementContext: elementCtx,
+                    baseUrl: redirectUrl,
+                    isUrl: true
+                )
             }
             if link.isEmpty {
                 // 再退一步：取元素内第一个 a 的 href
@@ -608,14 +622,17 @@ class WebBook {
             func value(_ rule: String?, _ label: String) -> String {
                 guard let rule, !rule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
                 do {
-                    let text = try ruleEngine.getString(ruleStr: rule, elementContext: elementCtx, baseUrl: baseUrl)
+                    // 封面/详情地址交给 getString(isUrl:) 统一处理（对齐 Android）
+                    let isLink = (label == "coverUrl" || label == "bookUrl")
+                    let text = try ruleEngine.getString(
+                        ruleStr: rule,
+                        elementContext: elementCtx,
+                        baseUrl: baseUrl,
+                        isUrl: isLink
+                    )
                     if text.isEmpty {
                         AppLogger.debug("Rule", "\(source.bookSourceName) 字段 \(label) 为空 rule=\(rule.prefix(140))")
                         return ""
-                    }
-                    // 封面/详情地址兜底绝对化：部分规则走 JSON/XPath 分支时不会自动补全
-                    if label == "coverUrl" || label == "bookUrl" {
-                        return WebBook.normalizeURL(text, base: baseUrl)
                     }
                     return text
                 } catch {

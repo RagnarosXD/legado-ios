@@ -757,6 +757,10 @@ enum JSONPathEvaluator {
                         }
                     }
 
+                case .function:
+                    // 已在 token 循环开头统一处理，这里仅为穷尽 switch
+                    break
+
                 case .filter(let expr):
                     if let array = value as? [Any] {
                         next.append(contentsOf: array.filter { matches(filter: expr, item: $0) })

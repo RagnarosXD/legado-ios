@@ -59,7 +59,25 @@ public final class BookSource {
     public var bookSourceUrl: String = ""
     public var bookSourceName: String?
     public var loginUrl: String?
+    public var loginUi: String?
+    public var loginCheckJs: String?
     public var header: String?
+}
+
+// MARK: - 登录态桩（Linux 侧只需要类型签名）
+
+public enum LoginStore {
+    public static func all(for source: BookSource) -> [String: String] { [:] }
+    public static func value(for source: BookSource, key: String) -> String? { nil }
+    public static func setValue(_ value: String, for source: BookSource, key: String) {}
+    public static func remove(for source: BookSource, key: String? = nil) {}
+    public static func hasLoginInfo(_ source: BookSource) -> Bool { false }
+}
+
+extension BookSource {
+    public var loginHeaderMap: [String: String] { [:] }
+    public var hasLoginForm: Bool { false }
+    public var hasLogin: Bool { false }
 }
 
 // MARK: - JSBridge 使用真实实现（JSBridge.swift 一起编译进临时包）

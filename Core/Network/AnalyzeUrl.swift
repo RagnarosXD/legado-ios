@@ -403,7 +403,27 @@ class AnalyzeUrl {
             url = retried
         }
 
-        var request = URLRequest(url: url)
+        // dnsIp：把域名直连到指定 IP（对齐 Android 的 Dns 替换）
+        // https 因证书校验与 SNI 绑定无法在 URLSession 层实现，这里只对 http 生效
+        var requestUrl = url
+        var dnsHostHeader: String?
+
+        if let dnsIp = analyzedUrl.dnsIp?.trimmingCharacters(in: .whitespaces), !dnsIp.isEmpty {
+            if url.scheme?.lowercased() == "http" {
+                let ip = dnsIp.split(separator: ",").first
+                    .map { String($0).trimmingCharacters(in: .whitespaces) } ?? dnsIp
+
+                if let replaced = replaceHost(url, with: ip) {
+                    requestUrl = replaced
+                    dnsHostHeader = url.host
+                    AppLogger.debug("HTTP", "dnsIp 直连 \(url.host ?? "") → \(ip)")
+                }
+            } else {
+                AppLogger.warn("HTTP", "dnsIp 仅对 http 生效（https 需证书与 SNI 匹配）：\(url.absoluteString.prefix(100))")
+            }
+        }
+
+        var request = URLRequest(url: requestUrl)
         request.httpMethod = analyzedUrl.method.rawValue
         // 多书源搜索时要快速失败；书源配置了 timeout（毫秒）则优先使用
         if analyzedUrl.timeout > 0 {
@@ -415,6 +435,11 @@ class AnalyzeUrl {
         // 设置 headers
         for (key, value) in analyzedUrl.headers {
             request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        // dnsIp 直连时保留原始域名（HTTP/1.1 靠 Host 头区分虚拟主机）
+        if let dnsHostHeader, request.value(forHTTPHeaderField: "Host") == nil {
+            request.setValue(dnsHostHeader, forHTTPHeaderField: "Host")
         }
         
         // 设置 body
@@ -449,7 +474,11 @@ class AnalyzeUrl {
 
         while attempt <= analyzedUrl.retry {
             do {
-                let (payload, resp) = try await URLSession.shared.data(for: request)
+                // followRedirects=false：用不跟随重定向的 session，直接拿 3xx 响应体
+                let session = analyzedUrl.followRedirects
+                    ? URLSession.shared
+                    : NoRedirectSession.shared.session
+                let (payload, resp) = try await session.data(for: request)
                 data = payload
                 rawResponse = resp
                 lastError = nil
@@ -469,6 +498,25 @@ class AnalyzeUrl {
 
         // 处理编码
         let encoding = detectEncoding(data: data, response: response, charset: analyzedUrl.charset)
+
+        // type：直接按字节输出（对齐 Android AnalyzeUrl 的 type 字段，如 hex / base64）
+        if let type = analyzedUrl.type?.trimmingCharacters(in: .whitespaces).lowercased(),
+           !type.isEmpty, type != "text" {
+            let text: String
+            switch type {
+            case "hex":
+                text = data.map { String(format: "%02x", $0) }.joined()
+            case "base64":
+                text = data.base64EncodedString()
+            default:
+                text = String(data: data, encoding: encoding) ?? ""
+            }
+
+            let typedUrl = (response as? HTTPURLResponse)?.url?.absoluteString ?? analyzedUrl.url
+            AppLogger.info("HTTP", "type=\(type) bytes=\(data.count) chars=\(text.count)")
+            return (text, typedUrl)
+        }
+
         let body = String(data: data, encoding: encoding) ?? String(data: data, encoding: .utf8) ?? ""
 
         let finalUrl = (response as? HTTPURLResponse)?.url?.absoluteString ?? analyzedUrl.url
@@ -479,6 +527,13 @@ class AnalyzeUrl {
         return (body, finalUrl)
     }
     
+    /// 替换 URL 的 host（dnsIp 直连用）
+    private static func replaceHost(_ url: URL, with ip: String) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.host = ip
+        return components.url
+    }
+
     /// 表单体逐字段编码（对齐 Android encodeParams：`&` 分段、`=` 分键值、空格→`+`）
     static func encodeFormBody(_ body: String, charsetName: String?) -> Data? {
         let pairs = body.split(separator: "&", omittingEmptySubsequences: false)
@@ -677,5 +732,39 @@ private enum WebViewFetchError: LocalizedError {
         case .invalidState:
             return "WebView 请求状态异常"
         }
+    }
+}
+
+// MARK: - 不跟随重定向（对齐 Android OkHttp followRedirects(false)）
+
+final class NoRedirectSession {
+
+    static let shared = NoRedirectSession()
+
+    let session: URLSession
+
+    private init() {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 30
+        session = URLSession(
+            configuration: configuration,
+            delegate: NoRedirectDelegate(),
+            delegateQueue: nil
+        )
+    }
+}
+
+private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate {
+
+    /// 返回 nil 表示不跟随重定向，回调会拿到原始 3xx 响应
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

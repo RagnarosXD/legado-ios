@@ -58,6 +58,8 @@ public struct StubDocument {
 public final class BookSource {
     public var bookSourceUrl: String = ""
     public var bookSourceName: String?
+    public var bookSourceGroup: String?
+    public var bookSourceType: Int32 = 0
     public var loginUrl: String?
     public var loginUi: String?
     public var loginCheckJs: String?

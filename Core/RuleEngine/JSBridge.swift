@@ -157,21 +157,21 @@ class JSBridge {
         // 由 JS 包装层转成对象（对齐 Android 的 StrResponse，脚本可直接读 resp.body / resp.code）
         let connectJsonBlock: @convention(block) (String, String) -> String = { url, headers in
             guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
-            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders() ?? [:]
             return JSBridge.httpResponseJSON(url: url, method: "GET", body: nil, headers: merged)
         }
         javaObject?.setObject(connectJsonBlock, forKeyedSubscript: "__connectJson" as NSString)
 
         let getJsonBlock: @convention(block) (String, String) -> String = { url, headers in
             guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
-            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders() ?? [:]
             return JSBridge.httpResponseJSON(url: url, method: "GET", body: nil, headers: merged)
         }
         javaObject?.setObject(getJsonBlock, forKeyedSubscript: "__getJson" as NSString)
 
         let postJsonBlock: @convention(block) (String, String, String) -> String = { url, body, headers in
             guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
-            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders() ?? [:]
             return JSBridge.httpResponseJSON(url: url, method: "POST", body: body, headers: merged)
         }
         javaObject?.setObject(postJsonBlock, forKeyedSubscript: "__postJson" as NSString)
@@ -828,7 +828,7 @@ extension JSBridge {
         // java.head(url, headers)：HEAD 请求（对齐 JsExtensions.head）
         let headBlock: @convention(block) (String, String) -> String = { url, headers in
             guard !url.isEmpty else { return "{\"code\":-1}" }
-            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders() ?? [:]
             return JSBridge.httpResponseJSON(url: url, method: "HEAD", body: nil, headers: merged)
         }
         javaObject.setObject(headBlock, forKeyedSubscript: "__head" as NSString)

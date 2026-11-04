@@ -193,3 +193,21 @@
 - **最大风险在规则层**（P0-3、P0-4、P0-5）：这三项会让「看起来支持但实际解析失败」的源占比偏高，且难以从界面察觉。
 - **最大体验落差在书架**（P0-1、P0-2）：书架是入口，长按不能进详情、加书架是假状态，这两个最容易被用户第一时间发现。
 - 此前按「功能点是否覆盖」评估为 98%，按「逐点语义 + 交互一致」重新评估为 **86%**，差额主要在语义细节与批量/配置类能力。
+
+---
+
+## 十一、P1 修复记录（1.3.38 → 1.3.40）
+
+| # | 审计项 | 修复内容 | 影响 |
+| --- | --- | --- | --- |
+| P0-3 | `{{…}}` / `$n` 在字段规则不生效 | `getStringRaw` / `getStringList` / `getElements` 三个入口接入 `TemplateEngine.render`（对齐 `AnalyzeRule.kt:341-344` 的 `makeUpRule`） | 含 `{{page}}`、`{{$.x}}`、`$1` 的取值规则不再原样输出 |
+| P0-4 | JS 桥缺 18 个方法 | 补 `head` / `t2s` / `s2t` / `base64DecodeToByteArray` / `hexDecodeToByteArray` / `getSource` | 繁简转换、字节数组、HEAD 探测、取当前源信息的脚本可用 |
+| P0-5 | `java.get`/`connect`/`post` 返回字符串 | 改为返回 `{ code, body, url, headers }` 对象；变量读写拆到 `getVariable` / `putVariable`（对齐 Android `BaseSource`） | 脚本里 `resp.body`、`resp.code`、`resp.headers` 可正常取值 |
+| P1-13a | `@webjs:` 分段缺失 | `RuleSplitter.splitByJSSegments` 识别 `@webjs:`，`executeJSSegments` 用 `WebViewFetcher` 加载页面后执行脚本 | 依赖 WebView 渲染的规则段可用（仅 iOS） |
+| P1-13b | 首字符 `:` 的 allInOne 正则缺失 | `parseTypeAndRule` 在「以 `:` 开头且含正则元字符」时判定为 regex（避免误伤 `:first-child` 这类伪类） | 整条正则型规则可用 |
+| P2 | `&&` 遇列表结果被合并成单串 | `executeAnd` 只要任一段产出列表就返回列表（对齐 `AnalyzeByJSoup.kt:84-119` 的 addAll） | 多段列表规则保持逐项对应 |
+| P2 | `@all` 与 `@html` 同为 stripScripts | `@all` 改为原样 outerHtml（`@html` 仍删 script） | 需要原始 HTML（含 script）的规则正确 |
+| P2 | URL 缺 HEAD 方法 | `AnalyzedUrl.HTTPMethod` 加 `head`，解析 `"method":"HEAD"` | HEAD 探测类源可用 |
+| P2 | POST 表单已编码仍二次编码 | 检测 body 含 `%` 且含 `=` 时跳过 `encodeFormBody` | 手工编码的 body 不再被二次转义 |
+
+**仍未修（后续按失败源补）**：`java.webView` 之外的可视浏览器交互（`startBrowser`/`showBrowser`）、文件下载与解压（`downloadFile`/`cacheFile`/`unzipFile`）、字体反混淆（`queryTTF`/`replaceFont`）、RSA 签名（`createSign`/`createAsymmetricCrypto`）、`ajaxTestAll`、`@ownText` 的空白归一细节。

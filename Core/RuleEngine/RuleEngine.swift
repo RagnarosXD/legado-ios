@@ -1049,10 +1049,12 @@ class CSSParser: RuleExecutor {
 
         let loweredAttr = parsed.attr.lowercased()
 
-        // 对齐 Android AnalyzeByJSoup：@html 对「整个元素集合」删 script/style 后取 outerHtml，只产一条
+        // 对齐 Android AnalyzeByJSoup：
+        // @html 对整个元素集合删 script/style 后取 outerHtml，只产一条；
+        // @all 是原样 outerHtml（不删 script）
         if loweredAttr == "html" || loweredAttr == "all" {
             let combined = elements.compactMap { try? $0.outerHtml() }.joined()
-            let cleaned = CSSParser.stripScripts(combined)
+            let cleaned = loweredAttr == "html" ? CSSParser.stripScripts(combined) : combined
             return cleaned.isEmpty ? .none : .string(cleaned)
         }
 

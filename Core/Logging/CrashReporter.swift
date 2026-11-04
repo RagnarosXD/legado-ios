@@ -2,10 +2,12 @@
 //  CrashReporter.swift
 //  Legado-iOS
 //
-//  崩溃捕获：
-//  - ObjC 异常（NSException）：记录 name / reason / callStackSymbols
-//  - 信号（SIGABRT / SIGSEGV / SIGBUS / SIGILL / SIGFPE）：只写内存里的最近日志，避免在信号上下文里做危险操作
-//  崩溃文件写到 Documents/Logs/crash-*.log，下次启动会单独记一条「上次异常退出」
+//  崩溃捕获（全部写进同一个主日志 Documents/Logs/legado.log）：
+//  - ObjC 异常（NSException）：记录 name / reason / callStackSymbols / 最近日志
+//  - 信号（SIGABRT / SIGSEGV / SIGBUS / SIGILL / SIGFPE / SIGTRAP）：只用
+//    async-signal-safe 的 write + backtrace_symbols_fd 追加 backtrace
+//  - 不再每次启动预创建 crash-*.log（旧版那种空文件会导致真正的崩溃报告被覆盖）
+//  - 启动时把旧版遗留的 crash-*.log 合并进主日志后删除
 //
 
 import Foundation
@@ -17,6 +19,9 @@ enum CrashReporter {
     private static var installed = false
     private static let launchFlagKey = "legado.lastLaunchFinished"
 
+    /// 预先打开的主日志 fd（O_APPEND），供信号上下文安全使用
+    private static var logFileDescriptor: Int32 = -1
+
     // MARK: - 安装
 
     static func install() {
@@ -25,25 +30,20 @@ enum CrashReporter {
 
         let previousLaunchFinished = UserDefaults.standard.bool(forKey: launchFlagKey)
         if previousLaunchFinished == false {
-            AppLogger.warn("Crash", "检测到上次未正常退出，日志目录：\(AppLogger.directory.lastPathComponent)")
+            AppLogger.warn("Crash", "检测到上次未正常退出（watchdog / OOM 或被手动强杀都不会有 backtrace）")
         }
         UserDefaults.standard.set(false, forKey: launchFlagKey)
 
-        // 不依赖「是否正常退出」判断：只要磁盘上有还没导入过的崩溃报告就合并进主日志
-        importPendingCrashReports()
+        // 旧版散落的 crash-*.log 合并进主日志（空文件直接删除）
+        AppLogger.shared.mergeLegacyCrashReports()
 
-        // ObjC 异常
+        // 预打开主日志：信号处理里不能再 open / 做 FileManager 操作
+        logFileDescriptor = AppLogger.openAppendDescriptor()
+
+        // ObjC 异常（SwiftSoup / Core Data / UIKit 抛的 NSException 会走这里）
         NSSetUncaughtExceptionHandler { exception in
-            let callStack = exception.callStackSymbols
-            CrashReporter.writeReport(
-                kind: "NSException",
-                detail: "name=\(exception.name.rawValue) reason=\(exception.reason ?? "-")",
-                callStack: callStack
-            )
+            CrashReporter.appendExceptionReport(exception)
         }
-
-        // 崩溃文件预先打开：信号上下文里不能再做 FileManager / DateFormatter 之类的操作
-        crashFileDescriptor = prepareCrashFile()
 
         // 信号：只用 async-signal-safe 的 write + backtrace_symbols_fd
         let signals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP]
@@ -57,25 +57,51 @@ enum CrashReporter {
         }
     }
 
-    // MARK: - 信号快照（async-signal-safe）
-
-    private static var crashFileDescriptor: Int32 = -1
-
-    private static func prepareCrashFile() -> Int32 {
-        let directory = AppLogger.directory
-        directory.path.withCString { _ = mkdir($0, 0o755) }
-
-        let stamp = Int(Date().timeIntervalSince1970)
-        let path = directory.appendingPathComponent("crash-\(stamp).log").path
-        return path.withCString { open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644) }
+    /// App 正常进入前台后标记一次，用来判断下次启动是否为异常退出
+    static func markLaunchFinished() {
+        UserDefaults.standard.set(true, forKey: launchFlagKey)
     }
 
+    // MARK: - NSException
+
+    private static func appendExceptionReport(_ exception: NSException) {
+        var lines: [String] = []
+        lines.append("")
+        lines.append("===== 崩溃（NSException）=====")
+        lines.append("name: \(exception.name.rawValue)")
+        lines.append("reason: \(exception.reason ?? "-")")
+        lines.append("version: \(AppLogger.appVersion)")
+        lines.append("system: \(UIDevice.current.systemName) \(UIDevice.current.systemVersion) / \(UIDevice.current.model)")
+        lines.append("time: \(Date())")
+        lines.append("--- call stack ---")
+        lines.append(contentsOf: exception.callStackSymbols)
+        lines.append("--- 最近日志 ---")
+        lines.append(contentsOf: AppLogger.shared.recentLinesSnapshot(limit: 120))
+        lines.append("===== 崩溃结束 =====")
+        lines.append("")
+
+        // 崩溃上下文里不依赖 FileHandle 的锁，直接 open + write
+        let path = AppLogger.directory.appendingPathComponent(AppLogger.activeFileName).path
+        path.withCString { pointer in
+            let fd = open(pointer, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+            guard fd >= 0 else { return }
+            writeText(lines.joined(separator: "\n") + "\n", to: fd)
+            fsync(fd)
+            close(fd)
+        }
+    }
+
+    // MARK: - 信号快照（async-signal-safe）
+
     private static func writeSignalSnapshot(_ sig: Int32) {
-        let fd = crashFileDescriptor
+        let fd = logFileDescriptor
         guard fd >= 0 else { return }
 
-        writeCString("=== Legado CRASH (signal) ===\n", to: fd)
+        writeCString("\n===== 崩溃（signal backtrace）=====\n", to: fd)
         writeCString(signalName(sig), to: fd)
+        writeCString("\n", to: fd)
+        writeCString("version: ", to: fd)
+        writeCString(AppLogger.appVersion, to: fd)
         writeCString("\n--- backtrace ---\n", to: fd)
 
         // backtrace + backtrace_symbols_fd 是 async-signal-safe 的，不依赖 Swift/Foundation
@@ -85,7 +111,7 @@ enum CrashReporter {
             backtrace_symbols_fd(&frames, count, fd)
         }
 
-        writeCString("--- end ---\n", to: fd)
+        writeCString("===== backtrace 结束 =====\n", to: fd)
         fsync(fd)
     }
 
@@ -95,109 +121,57 @@ enum CrashReporter {
         }
     }
 
-    /// App 正常进入前台后标记一次，用来判断下次启动是否为异常退出
-    static func markLaunchFinished() {
-        UserDefaults.standard.set(true, forKey: launchFlagKey)
+    private static func writeText(_ text: String, to fd: Int32) {
+        guard let data = text.data(using: .utf8) else { return }
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            var written = 0
+            while written < buffer.count {
+                let result = write(fd, base.advanced(by: written), buffer.count - written)
+                if result <= 0 { break }
+                written += result
+            }
+        }
     }
 
-    // MARK: - 把崩溃报告写进主日志
+    // MARK: - 兼容旧 API
 
-    private static let lastImportedCrashKey = "legado.lastImportedCrash"
-
-    /// 之前的实现只在「上次启动未满 3 秒就退出」时才合并崩溃报告，
-    /// 而崩溃通常发生在启动几秒之后，导致崩了也永远看不到调用栈。改为按文件去重。
-    private static func importPendingCrashReports() {
-        let directory = AppLogger.directory
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        )) ?? []
-
-        let crashFiles = files
-            .filter { $0.lastPathComponent.hasPrefix("crash-") }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
-
-        guard let latest = crashFiles.first else {
-            AppLogger.warn("Crash", "没有崩溃报告文件（可能是 watchdog / OOM 直接杀进程，未触发信号）")
-            return
-        }
-
-        let lastImported = UserDefaults.standard.string(forKey: lastImportedCrashKey)
-        guard latest.lastPathComponent != lastImported else { return }
-        UserDefaults.standard.set(latest.lastPathComponent, forKey: lastImportedCrashKey)
-
-        guard let text = try? String(contentsOf: latest, encoding: .utf8) else {
-            AppLogger.warn("Crash", "崩溃报告读取失败：\(latest.lastPathComponent)")
-            return
-        }
-
-        AppLogger.error("Crash", "===== 崩溃报告 \(latest.lastPathComponent) =====")
-        for line in text.components(separatedBy: "\n").prefix(120) where !line.isEmpty {
-            AppLogger.error("Crash", line)
-        }
-        AppLogger.error("Crash", "===== 崩溃报告结束 =====")
-    }
-
-    // MARK: - 落盘
-
+    /// 保留给其它调用方：直接把一段报告追加进主日志
     static func writeReport(kind: String, detail: String, callStack: [String]) {
-        let directory = AppLogger.directory
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let stamp = timestamp()
-        let url = directory.appendingPathComponent("crash-\(stamp).log")
-
         var lines: [String] = []
-        lines.append("=== Legado 崩溃报告 ===")
-        lines.append("kind: \(kind)")
+        lines.append("")
+        lines.append("===== 崩溃（\(kind)）=====")
         lines.append("detail: \(detail)")
         lines.append("version: \(AppLogger.appVersion)")
-        lines.append("system: \(UIDevice.current.systemName) \(UIDevice.current.systemVersion) / \(UIDevice.current.model)")
-        lines.append("time: \(Date())")
         if !callStack.isEmpty {
-            lines.append("")
             lines.append("--- call stack ---")
             lines.append(contentsOf: callStack)
         }
+        lines.append("--- 最近日志 ---")
+        lines.append(contentsOf: AppLogger.shared.recentLinesSnapshot(limit: 120))
+        lines.append("===== 崩溃结束 =====")
         lines.append("")
-        lines.append("--- recent logs ---")
-        lines.append(contentsOf: AppLogger.shared.recentLinesSnapshot())
 
-        let text = lines.joined(separator: "\n") + "\n"
-        guard let data = text.data(using: .utf8) else { return }
-
-        // 用低层 write，避免在崩溃上下文里依赖 FileHandle / Foundation 的锁
-        url.path.withCString { path in
-            let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        let path = AppLogger.directory.appendingPathComponent(AppLogger.activeFileName).path
+        path.withCString { pointer in
+            let fd = open(pointer, O_WRONLY | O_CREAT | O_APPEND, 0o644)
             guard fd >= 0 else { return }
-            data.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress else { return }
-                var written = 0
-                while written < buffer.count {
-                    let result = write(fd, base.advanced(by: written), buffer.count - written)
-                    if result <= 0 { break }
-                    written += result
-                }
-            }
+            writeText(lines.joined(separator: "\n") + "\n", to: fd)
+            fsync(fd)
             close(fd)
         }
     }
 
     // MARK: - 工具
 
-    private static func timestamp() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return formatter.string(from: Date())
-    }
-
     private static func signalName(_ sig: Int32) -> String {
         switch sig {
-        case SIGABRT: return "SIGABRT(\(sig))"
-        case SIGSEGV: return "SIGSEGV(\(sig))"
-        case SIGBUS: return "SIGBUS(\(sig))"
-        case SIGILL: return "SIGILL(\(sig))"
-        case SIGFPE: return "SIGFPE(\(sig))"
+        case SIGABRT: return "SIGABRT(\(sig))  —— 通常是被系统或断言终止（含 Swift 数组越界 / force unwrap nil）"
+        case SIGSEGV: return "SIGSEGV(\(sig))  —— 访问了非法内存"
+        case SIGBUS: return "SIGBUS(\(sig))  —— 内存对齐 / 映射错误"
+        case SIGILL: return "SIGILL(\(sig))  —— 非法指令"
+        case SIGFPE: return "SIGFPE(\(sig))  —— 算术异常"
+        case SIGTRAP: return "SIGTRAP(\(sig))  —— 断点 / Swift 运行时 trap"
         default: return "SIG\(sig)"
         }
     }

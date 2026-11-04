@@ -2,13 +2,20 @@
 //  AppLogger.swift
 //  Legado-iOS
 //
-//  运行日志：落盘到 Documents/Logs/app-*.log
-//  - 固定大小滚动（单文件 2MB，保留 3 个）
-//  - 内存保留最近 400 条，崩溃时由 CrashReporter 落盘
-//  - 设置页可导出，便于用户在无 Mac 的环境反馈闪退原因
+//  运行日志：单一文件 Documents/Logs/legado.log（追加写入，不再每次启动新建）
+//  - 启动时写一条分隔行（版本 + 时间），多次启动的记录都在同一个文件里
+//  - 单文件超过 5MB 轮转为 legado.1.log（只保留 1 个历史，够回溯即可）
+//  - 用 O_APPEND 的 fd 写入：崩溃时 CrashReporter 也能安全追加到同一个 fd
+//  - 内存保留最近 400 条，供崩溃时兜底
 //
 
 import Foundation
+
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 final class AppLogger {
 
@@ -58,15 +65,20 @@ final class AppLogger {
 
     // MARK: - 配置
 
+    /// 统一的主日志文件名（崩溃报告也写这里）
+    static let activeFileName = "legado.log"
+    /// 轮转后的历史文件名
+    static let archiveFileName = "legado.1.log"
+    /// 超过该大小就轮转
+    static let maxFileSize: Int = 5 * 1024 * 1024
+
     private let queue = DispatchQueue(label: "com.legado.applogger", qos: .utility)
     private let memoryLock = NSLock()
     private var memoryLines: [String] = []
     private let maxMemoryLines = 400
 
-    /// 最多保留的日志文件数（每次启动一个文件）
-    private let maxFileCount = 12
-
-    private var handle: FileHandle?
+    /// O_APPEND 的 fd：与 CrashReporter 共享同一文件，两边都追加写
+    private var fileDescriptor: Int32 = -1
     private var currentURL: URL?
 
     /// DateFormatter 不是线程安全的，日志可能从任意线程写入，这里每次新建（开销可忽略）
@@ -94,15 +106,12 @@ final class AppLogger {
         return "\(short)(\(build))"
     }
 
-    /// 当前日志文件（导出用），始终返回一个可分享的 URL
+    /// 当前日志文件（导出用）
     var currentLogFile: URL {
         if let url = currentURL {
             return url
         }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let stamp = formatter.string(from: Date())
-        let url = Self.directory.appendingPathComponent("app-\(stamp).log")
+        let url = Self.directory.appendingPathComponent(Self.activeFileName)
         try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
@@ -110,6 +119,7 @@ final class AppLogger {
         return url
     }
 
+    /// 所有日志文件（主日志 + 轮转历史 + 旧版遗留），按名称排序
     func allLogFiles() -> [URL] {
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: Self.directory,
@@ -118,6 +128,14 @@ final class AppLogger {
         return contents
             .filter { $0.pathExtension == "log" }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    /// 供 CrashReporter 在信号上下文里复用：预先打开追加模式的 fd
+    /// （信号处理里不能再做 FileManager / open 之类的操作）
+    static func openAppendDescriptor() -> Int32 {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent(activeFileName).path
+        return path.withCString { open($0, O_WRONLY | O_CREAT | O_APPEND, 0o644) }
     }
 
     // MARK: - 记录
@@ -149,11 +167,14 @@ final class AppLogger {
 
         guard let data = (text + "\n").data(using: .utf8) else { return }
 
-        // 同步写 + 立即 flush：之前用 queue.async，进程被系统杀掉（watchdog / OOM）时
-        // 队列里最后几秒的日志全丢了，看起来「日志太少」。日志量本身很小，同步成本可接受。
+        // 同步写 + fsync：进程被系统杀掉（watchdog / OOM）时，队列里未落盘的日志会丢失
         queue.sync {
-            handle?.write(data)
-            try? handle?.synchronize()
+            guard fileDescriptor >= 0 else { return }
+            data.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                _ = Darwin.write(fileDescriptor, base, buffer.count)
+            }
+            fsync(fileDescriptor)
         }
     }
 
@@ -175,63 +196,112 @@ final class AppLogger {
 
     // MARK: - 文件管理
 
-    /// 每次启动新建一个 app-yyyyMMdd-HHmmss.log，文件名即启动时间（精确到秒），不需要手动改名
+    /// 打开（或创建）主日志文件：追加写入，不新建文件；
+    /// 超过上限时先把旧文件轮转为 legado.1.log，再以空的 legado.log 继续
     private func openLogFile() {
-        queue.async { [weak self] in
-            guard let self else { return }
+        queue.sync {
             let directory = Self.directory
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let stamp = formatter.string(from: Date())
+            let url = directory.appendingPathComponent(Self.activeFileName)
 
-            var url = directory.appendingPathComponent("app-\(stamp).log")
-            var suffix = 2
-            while FileManager.default.fileExists(atPath: url.path) {
-                url = directory.appendingPathComponent("app-\(stamp)-\(suffix).log")
-                suffix += 1
+            // 超过上限先轮转
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let size = attributes[.size] as? Int,
+               size > Self.maxFileSize {
+                Self.rotate(in: directory)
             }
 
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-            self.handle = try? FileHandle(forWritingTo: url)
-            self.currentURL = url
+            fileDescriptor = url.path.withCString { open($0, O_WRONLY | O_CREAT | O_APPEND, 0o644) }
+            currentURL = url
 
-            self.trimArchives(keeping: self.maxFileCount)
+            // 启动分隔：多次启动的记录都在同一个文件里，靠这行区分会话
+            writeSessionSeparator()
         }
     }
 
-    /// 删除全部日志文件，并新建一个空文件继续记录
+    private static func rotate(in directory: URL) {
+        let active = directory.appendingPathComponent(activeFileName)
+        let archive = directory.appendingPathComponent(archiveFileName)
+        try? FileManager.default.removeItem(at: archive)
+        try? FileManager.default.moveItem(at: active, to: archive)
+    }
+
+    private func writeSessionSeparator() {
+        guard fileDescriptor >= 0 else { return }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let line = "\n========== 启动 v\(Self.appVersion) \(formatter.string(from: Date())) ==========\n"
+
+        guard let data = line.data(using: .utf8) else { return }
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            _ = Darwin.write(fileDescriptor, base, buffer.count)
+        }
+        fsync(fileDescriptor)
+    }
+
+    /// 删除全部日志文件，并继续写主日志
     func deleteAllLogs() {
         queue.sync {
-            handle?.closeFile()
-            handle = nil
+            if fileDescriptor >= 0 {
+                close(fileDescriptor)
+                fileDescriptor = -1
+            }
 
             for url in allLogFiles() {
                 try? FileManager.default.removeItem(at: url)
             }
 
-            let url = Self.directory.appendingPathComponent(Self.makeLogFileName())
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-            handle = try? FileHandle(forWritingTo: url)
+            // 旧版按次生成的 app-*.log / crash-*.log 也一并清掉
+            let legacy = (try? FileManager.default.contentsOfDirectory(
+                at: Self.directory,
+                includingPropertiesForKeys: nil
+            )) ?? []
+            for url in legacy where url.lastPathComponent.hasPrefix("app-") || url.lastPathComponent.hasPrefix("crash-") {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            let url = Self.directory.appendingPathComponent(Self.activeFileName)
+            fileDescriptor = url.path.withCString { open($0, O_WRONLY | O_CREAT | O_APPEND, 0o644) }
             currentURL = url
         }
 
         Self.warn("Log", "日志已清除")
     }
 
-    private static func makeLogFileName() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "app-\(formatter.string(from: Date())).log"
-    }
+    /// 把散落的崩溃报告（旧版 crash-*.log）合并进主日志，合并后删除源文件
+    func mergeLegacyCrashReports() {
+        let directory = Self.directory
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
 
-    /// 只保留最近 N 个日志文件
-    private func trimArchives(keeping count: Int) {
-        let logs = allLogFiles()   // 已按文件名（即时间）降序
-        guard logs.count > count else { return }
-        for url in logs.dropFirst(count) {
-            try? FileManager.default.removeItem(at: url)
+        let crashFiles = files
+            .filter { $0.lastPathComponent.hasPrefix("crash-") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        guard !crashFiles.isEmpty else { return }
+
+        for file in crashFiles {
+            let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if trimmed.isEmpty {
+                // 空报告（旧版每次启动预创建的那种）直接删除，不当作崩溃
+                try? FileManager.default.removeItem(at: file)
+                continue
+            }
+
+            Self.error("Crash", "===== 合并崩溃报告 \(file.lastPathComponent) =====")
+            for line in trimmed.components(separatedBy: "\n").prefix(200) where !line.isEmpty {
+                Self.error("Crash", line)
+            }
+            Self.error("Crash", "===== 崩溃报告结束 \(file.lastPathComponent) =====")
+
+            try? FileManager.default.removeItem(at: file)
         }
     }
 }

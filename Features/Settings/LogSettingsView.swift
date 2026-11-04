@@ -75,7 +75,7 @@ struct LogSettingsView: View {
                 }
                 .disabled(files.isEmpty)
             } footer: {
-                Text("日志保存在 Documents/Logs 下，每次启动一个文件，文件名即启动时间。")
+                Text("所有运行日志与崩溃记录都写进同一个 legado.log（启动时用分隔行区分会话），超过 5MB 自动轮转为 legado.1.log。反馈问题直接分享这个文件即可。")
             }
         }
         .navigationTitle("运行日志")

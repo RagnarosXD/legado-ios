@@ -689,6 +689,12 @@ enum JSONPathEvaluator {
         var current: [Any] = [root]
 
         for token in tokens {
+            // 函数作用于整个结果集（不是逐元素）
+            if case .function(let name) = token {
+                current = applyFunction(name, to: current)
+                continue
+            }
+
             var next: [Any] = []
 
             for value in current {
@@ -751,10 +757,7 @@ enum JSONPathEvaluator {
                         }
                     }
 
-                case .function(let name):
-                results = applyFunction(name, to: results)
-
-            case .filter(let expr):
+                case .filter(let expr):
                     if let array = value as? [Any] {
                         next.append(contentsOf: array.filter { matches(filter: expr, item: $0) })
                     }

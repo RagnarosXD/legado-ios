@@ -28,11 +28,19 @@ public final class JSContext {
 public protocol XMLElement {
     var text: String? { get }
     var toHTML: String? { get }
+    /// Kanna 的 CSS 选择（真实实现返回 XPathObject，可迭代）
+    func css(_ selector: String) -> [XMLElement]
+    /// 属性取值：element["href"]
+    subscript(attribute: String) -> String? { get }
 }
 
 public struct StubElement: XMLElement {
     public var text: String?
     public var toHTML: String?
+
+    public func css(_ selector: String) -> [XMLElement] { [] }
+
+    public subscript(attribute: String) -> String? { nil }
 }
 
 public enum Kanna {

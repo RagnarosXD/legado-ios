@@ -20,6 +20,10 @@ class ElementContext {
     var variables: [String: String] = [:]
     /// XPath 命中的原始节点（保留节点身份，避免 toHTML 二次解析丢结构）
     var xpathNode: XMLElement?
+    /// 是否允许在 XPath 节点上用 CSS 子规则。
+    /// Kanna 的 css() 内部要把选择器转成 XPath 再执行，元素多时会成倍变慢；
+    /// 列表结果超过阈值时由调用方关闭，回退到字符串二次解析（快但结构可能变形）
+    var allowScopedXPath = true
     /// 初始结果：URL 规则里的 `@result` / JS 段需要拿到上一段的值
     var initialResult: String?
 
@@ -769,7 +773,8 @@ class RuleEngine {
 
         // XPath 命中节点：优先在该节点范围内执行 CSS 子规则，
         // 避免把节点 HTML 重新 parse（表格/嵌套结构会变形）
-        if let node = elementContext.xpathNode,
+        if elementContext.allowScopedXPath,
+           let node = elementContext.xpathNode,
            let scoped = selectScopedInXPathNode(ruleStr: ruleStr, node: node, baseUrl: baseUrl) {
             return scoped
         }

@@ -34,6 +34,16 @@ enum CrashReporter {
     private static var nameFPECString: UnsafeMutablePointer<CChar>?
     private static var nameTRAPCString: UnsafeMutablePointer<CChar>?
 
+    /// 主线程 pthread（install 时保存），用于卡顿时发 SIGPROF 采样
+    private static var mainThreadHandle: pthread_t?
+    private static var profHeaderCString: UnsafeMutablePointer<CChar>?
+    private static let profMaxFrames = 64
+    private static var profFrames: UnsafeMutablePointer<UnsafeMutableRawPointer?> = {
+        let pointer = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: profMaxFrames)
+        pointer.initialize(repeating: nil, count: profMaxFrames)
+        return pointer
+    }()
+
     private static let maxFrames = 96
     /// 预分配的回溯缓冲区（信号里不能 malloc）
     private static var framesBuffer: UnsafeMutablePointer<UnsafeMutableRawPointer?> = {
@@ -78,6 +88,22 @@ enum CrashReporter {
             }
         }
 
+        // 主线程卡顿采样：看门狗对主线程发 SIGPROF，handler 里抓的正是主线程的栈。
+        // SIGPROF 默认行为是终止进程，这里必须覆盖。
+        mainThreadHandle = pthread_self()
+        profHeaderCString = strdup("\n===== 主线程卡顿栈（SIGPROF 采样）=====\n--- backtrace ---\n")
+        signal(SIGPROF) { _ in
+            let fd = logFileDescriptor
+            guard fd >= 0 else { return }
+            CrashReporter.writeCString(profHeaderCString, to: fd)
+            let count = backtrace(profFrames, Int32(profMaxFrames))
+            if count > 0 {
+                backtrace_symbols_fd(profFrames, count, fd)
+            }
+            CrashReporter.writeCString(tailCString, to: fd)
+            fsync(fd)
+        }
+
         // 标脏：正常进入前台后由 markLaunchFinished 置为 false
         UserDefaults.standard.set(true, forKey: launchFlagKey)
     }
@@ -95,6 +121,12 @@ enum CrashReporter {
         nameILLCString = strdup("SIGILL —— 非法指令")
         nameFPECString = strdup("SIGFPE —— 算术异常")
         nameTRAPCString = strdup("SIGTRAP —— 断点 / Swift 运行时 trap")
+    }
+
+    /// 让看门狗在主线程卡住时调用：给主线程发 SIGPROF，抓它当前的调用栈
+    static func sampleMainThreadStack() {
+        guard let thread = mainThreadHandle else { return }
+        pthread_kill(thread, SIGPROF)
     }
 
     /// App 正常进入前台后调用：下次启动就不会误报「异常退出」

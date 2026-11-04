@@ -412,8 +412,16 @@ final class MainThreadWatchdog {
         }
         lock.unlock()
 
-        guard elapsed > 5, !alreadyReported else { return }
+        guard elapsed > 5 else { return }
 
-        AppLogger.error("Watchdog", "主线程已卡住 \(Int(elapsed)) 秒，最后阶段：\(current)")
+        if !alreadyReported {
+            AppLogger.error("Watchdog", "主线程已卡住 \(Int(elapsed)) 秒，最后阶段：\(current)")
+        }
+
+        // 卡过 10 秒基本没救了，抓一次主线程栈（SIGPROF），留给下次启动看
+        if elapsed > 10 {
+            ProgressRecorder.record("主线程卡死 \(Int(elapsed)) 秒，最后阶段：\(current)")
+            CrashReporter.sampleMainThreadStack()
+        }
     }
 }

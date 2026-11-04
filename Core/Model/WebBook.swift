@@ -606,17 +606,44 @@ class WebBook {
     ) throws -> [SearchBookResult] {
         AppLogger.debug("Rule", "\(source.bookSourceName) bookList=\(bookListRule?.prefix(160) ?? "nil") bodyLen=\(body.count)")
 
+        let listStarted = Date()
         let elements = try ruleEngine.getElements(
             ruleStr: bookListRule,
             body: body,
             baseUrl: baseUrl
         )
+        let listCost = Int(Date().timeIntervalSince(listStarted) * 1000)
 
-        AppLogger.debug("Rule", "\(source.bookSourceName) 列表元素=\(elements.count)")
+        AppLogger.debug("Rule", "\(source.bookSourceName) 列表元素=\(elements.count) 选择耗时=\(listCost)ms")
+
+        // 结果上限：个别源一页返回上千条，逐条取 7 个字段会把主线程卡死
+        let maxItems = 200
+        let limited = elements.count > maxItems ? Array(elements.prefix(maxItems)) : elements
+        if elements.count > maxItems {
+            AppLogger.warn("Rule", "\(source.bookSourceName) 结果 \(elements.count) 条，只解析前 \(maxItems) 条")
+        }
+
+        // Kanna 的 css() 每次都要编译 XPath，元素多时成倍变慢；超过阈值就关掉节点范围选择
+        let scopedXPathOK = limited.count <= 50
 
         var books: [SearchBookResult] = []
+        let parseStarted = Date()
 
-        for elementCtx in elements {
+        for (index, elementCtx) in limited.enumerated() {
+            // 单源解析超过 3 秒熔断，避免一个源拖死整个搜索
+            if index % 5 == 0 {
+                let elapsed = Date().timeIntervalSince(parseStarted)
+                if elapsed > 3 {
+                    AppLogger.error(
+                        "Rule",
+                        "\(source.bookSourceName) 解析超时 \(String(format: "%.1f", elapsed))s，已处理 \(index)/\(limited.count)，熔断"
+                    )
+                    break
+                }
+                ProgressRecorder.record("解析 \(source.bookSourceName) 第 \(index)/\(limited.count) 条")
+            }
+
+            elementCtx.allowScopedXPath = scopedXPathOK
             elementCtx.source = source
             var book = SearchBookResult()
             book.sourceUrl = source.bookSourceUrl
@@ -660,6 +687,13 @@ class WebBook {
             if !book.name.isEmpty {
                 books.append(book)
             }
+        }
+
+        let parseCost = Int(Date().timeIntervalSince(parseStarted) * 1000)
+        if parseCost > 800 {
+            AppLogger.warn("Rule", "\(source.bookSourceName) 解析耗时 \(parseCost)ms（\(limited.count) 条）")
+        } else {
+            AppLogger.debug("Rule", "\(source.bookSourceName) 解析耗时 \(parseCost)ms（\(limited.count) 条）")
         }
 
         return books

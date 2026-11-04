@@ -316,16 +316,34 @@ enum ReaderTapZone {
     static func action(for location: CGPoint, in size: CGSize) -> Action {
         guard size.width > 0, size.height > 0 else { return .menu }
 
-        let column = min(2, max(0, Int(location.x / size.width * 3)))
-        let row = min(2, max(0, Int(location.y / size.height * 3)))
+        let xRatio = location.x / size.width
+        let yRatio = location.y / size.height
+        let mode = UserDefaults.standard.string(forKey: "reader.tapZoneMode") ?? "nineGrid"
 
-        switch (column, row) {
-        case (0, _):
-            return .prevPage
-        case (1, 1):
+        switch mode {
+        case "threeColumn":
+            // 左右各 1/3 翻页，中间唤菜单（不分上下）
+            if xRatio < 1.0 / 3.0 { return .prevPage }
+            if xRatio > 2.0 / 3.0 { return .nextPage }
             return .menu
+
+        case "fullTap":
+            // 上半屏上一页、下半屏下一页（菜单从顶栏唤出）
+            return yRatio < 0.5 ? .prevPage : .nextPage
+
         default:
-            return .nextPage
+            // 九宫格（Android setRect9x 默认）
+            let column = min(2, max(0, Int(xRatio * 3)))
+            let row = min(2, max(0, Int(yRatio * 3)))
+
+            switch (column, row) {
+            case (0, _):
+                return .prevPage
+            case (1, 1):
+                return .menu
+            default:
+                return .nextPage
+            }
         }
     }
 }

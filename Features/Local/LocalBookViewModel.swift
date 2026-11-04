@@ -64,6 +64,7 @@ class LocalBookViewModel: ObservableObject {
                 record.book = book
                 record.wordCount = Int32(chapter.content.count)
                 record.isCached = true
+                record.isVolume = chapter.isVolume
 
                 // 正文落盘为单章缓存文件，阅读时直接命中，避免每次翻页重新解析整本
                 let chapterFile = chapterDirectory.appendingPathComponent(String(format: "%05d.txt", index))

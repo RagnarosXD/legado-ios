@@ -82,6 +82,8 @@ struct LocalChapter {
     var title: String
     var content: String
     var href: String
+    /// 分卷标题（对齐 Android BookChapter.isVolume）
+    var isVolume: Bool = false
 }
 
 struct LocalBookParseResult {
@@ -302,6 +304,21 @@ enum ChapterSplitter {
 
         for line in lines {
             let candidate = line.trimmingCharacters(in: .whitespaces)
+
+            // 卷标题单独成条（不进正文，目录里显示为卷头）
+            if isVolumeHeading(candidate) {
+                flush()
+                buffer.removeAll()
+                chapters.append(LocalChapter(
+                    title: candidate,
+                    content: "",
+                    href: String(chapters.count),
+                    isVolume: true
+                ))
+                hasRealHeading = true
+                continue
+            }
+
             if isChapterHeading(candidate) {
                 flush()
                 buffer.removeAll()
@@ -328,6 +345,26 @@ enum ChapterSplitter {
             return [LocalChapter(title: fallbackTitle, content: text, href: "0")]
         }
         return chapters
+    }
+
+    /// 卷标题：第X卷 / 卷X / 上部 / 中部 / 下部
+    private static func isVolumeHeading(_ line: String) -> Bool {
+        guard !line.isEmpty, line.count <= 30 else { return false }
+
+        let patterns = [
+            "^\\s{0,4}第\\s*[0-9０-９零一二三四五六七八九十百千两]{1,8}\\s*卷.{0,20}$",
+            "^\\s{0,4}卷\\s*[0-9０-９零一二三四五六七八九十百千两]{1,8}.{0,20}$",
+            "^\\s{0,4}(?:第\\s*[0-9０-９零一二三四五六七八九十]{1,8}\\s*部).{0,20}$"
+        ]
+
+        let range = NSRange(line.startIndex..., in: line)
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               regex.firstMatch(in: line, range: range) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     private static func isChapterHeading(_ line: String) -> Bool {

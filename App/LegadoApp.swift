@@ -19,6 +19,12 @@ struct LegadoApp: App {
                 .task {
                     // 重新注册用户导入的字体（进程重启后需要重新注册）
                     FontImporter.registerAll()
+
+                    // 书源订阅：只在有「到期」的订阅时才拉取，避免每次启动都发请求
+                    let manager = SourceSubscriptionManager.shared
+                    if manager.subscriptions.contains(where: { $0.enabled && manager.needsUpdate($0) }) {
+                        await manager.updateAllSubscriptions()
+                    }
                 }
                 .onOpenURL { url in
                     handleURL(url)

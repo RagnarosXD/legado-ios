@@ -35,6 +35,8 @@ struct SourceSubscription: Identifiable, Codable {
 
 @MainActor
 class SourceSubscriptionManager: ObservableObject {
+
+    static let shared = SourceSubscriptionManager()
     
     // MARK: - Published 属性
     

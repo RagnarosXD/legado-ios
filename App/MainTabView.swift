@@ -49,6 +49,7 @@ struct SettingsView: View {
     @AppStorage("reader.keepScreenOn") private var keepScreenOn = false
     @AppStorage("reader.screenOrientation") private var screenOrientation = "auto"
     @AppStorage("searchTimeout") private var searchTimeout: Double = 90
+    @AppStorage("reader.tapZoneMode") private var tapZoneMode = "nineGrid"
     
     var body: some View {
         NavigationView {
@@ -72,6 +73,12 @@ struct SettingsView: View {
                     Picker("屏幕方向", selection: $screenOrientation) {
                         Text("跟随系统").tag("auto")
                         Text("仅竖屏").tag("portrait")
+                    }
+
+                    Picker("点击翻页区", selection: $tapZoneMode) {
+                        Text("九宫格（推荐）").tag("nineGrid")
+                        Text("左中右三栏").tag("threeColumn")
+                        Text("上下两半").tag("fullTap")
                     }
                 }
 

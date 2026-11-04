@@ -687,6 +687,7 @@ class RuleEngine {
     }
 
     /// 对齐 Android `getAbsoluteURL`：相对地址按 base 补全，空值回落 base
+    /// 这里内联实现，避免依赖 `@MainActor` 的 WebBook
     static func absoluteURL(_ value: String, base: String?) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = trimmed.lowercased()
@@ -700,8 +701,21 @@ class RuleEngine {
             return base ?? ""
         }
 
-        guard let base, !base.isEmpty else { return trimmed }
-        return WebBook.normalizeURL(trimmed, base: base)
+        // 已经是绝对地址
+        if lowered.hasPrefix("http://") || lowered.hasPrefix("https://") || lowered.hasPrefix("data:") {
+            return trimmed
+        }
+
+        guard let base, !base.isEmpty, let baseURL = URL(string: base) else { return trimmed }
+
+        // 协议相对地址 //host/path
+        if trimmed.hasPrefix("//") {
+            if let scheme = baseURL.scheme {
+                return "\(scheme):\(trimmed)"
+            }
+        }
+
+        return URL(string: trimmed, relativeTo: baseURL)?.absoluteString ?? trimmed
     }
 
     /// 原取值实现（不含 isUrl 处理）

@@ -5,6 +5,7 @@
 //  书源实体
 //
 
+import JavaScriptCore
 import Foundation
 import CoreData
 

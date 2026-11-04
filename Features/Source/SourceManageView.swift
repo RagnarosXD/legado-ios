@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import JavaScriptCore
 import CoreData
 import Foundation
 import UniformTypeIdentifiers
@@ -26,6 +27,9 @@ struct SourceManageView: View {
     @AppStorage("searchConcurrency") private var concurrency: Int = 4
     
     @State private var showingExporter = false
+    /// 登录表单
+    @State private var loginTarget: BookSource?
+    @State private var showingLogin = false
     @State private var exportDocument = JSONDataDocument()
     @State private var exportFileName = "bookSource"
 
@@ -129,6 +133,14 @@ struct SourceManageView: View {
             }
             .sheet(isPresented: $showingImport) {
                 SourceImportView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showingLogin, onDismiss: {
+                loginTarget = nil
+                Task { await viewModel.loadSources() }
+            }) {
+                if let loginTarget {
+                    SourceLoginSheet(source: loginTarget)
+                }
             }
             .fileExporter(
                 isPresented: $showingExporter,
@@ -323,6 +335,18 @@ struct SourceManageView: View {
                     Label(
                         source.enabledExplore ? "停用发现" : "启用发现",
                         systemImage: "safari"
+                    )
+                }
+            }
+
+            if source.hasLoginForm || source.loginUrl?.isEmpty == false {
+                Button {
+                    loginTarget = source
+                    showingLogin = true
+                } label: {
+                    Label(
+                        source.hasLogin ? "已登录（管理）" : "登录",
+                        systemImage: "person.badge.key"
                     )
                 }
             }
@@ -662,5 +686,155 @@ enum SourceTypeSection: Int32, CaseIterable {
         case .image: return "漫画"
         case .file: return "文件"
         }
+    }
+}
+
+// MARK: - 登录表单（对齐 Android SourceLoginDialog）
+
+struct SourceLoginSheet: View {
+
+    let source: BookSource
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var rows: [LoginRow] = []
+    @State private var values: [String: String] = [:]
+    @State private var message: String?
+    @State private var loggedIn = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    HStack {
+                        Text(source.bookSourceName)
+                            .font(.headline)
+                        Spacer()
+                        Text(loggedIn ? "已登录" : "未登录")
+                            .font(.caption)
+                            .foregroundColor(loggedIn ? .green : .secondary)
+                    }
+                }
+
+                if rows.filter({ $0.isInput }).isEmpty && rows.filter({ $0.type == "button" }).isEmpty {
+                    Section {
+                        Text("该源没有提供登录表单")
+                            .foregroundColor(.secondary)
+                        if let loginUrl = source.loginUrl, !loginUrl.isEmpty {
+                            Text("登录页：\(loginUrl)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Text("可以尝试「检查登录状态」，或直接在书源 header 里配置 Cookie。")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Section("登录信息") {
+                        ForEach(rows) { row in
+                            rowView(row)
+                        }
+                    }
+                }
+
+                Section {
+                    Button("保存登录信息") { save() }
+
+                    Button("检查登录状态") { check() }
+
+                    Button("退出登录", role: .destructive) {
+                        LoginStore.remove(for: source)
+                        values = [:]
+                        loggedIn = false
+                        message = "已清除该源的登录信息"
+                    }
+                }
+
+                if let message {
+                    Section {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("登录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") {
+                        save()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .task {
+            rows = LoginUiParser.parse(source.loginUi)
+            values = LoginStore.all(for: source)
+            loggedIn = LoginRunner.check(source)
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: LoginRow) -> some View {
+        switch row.type {
+        case "password":
+            SecureField(row.hint ?? row.name, text: binding(for: row))
+
+        case "text":
+            TextField(row.hint ?? row.name, text: binding(for: row))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+        case "label":
+            Text(row.name)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+        case "select":
+            Picker(row.name, selection: binding(for: row)) {
+                ForEach(row.options ?? [], id: \.self) { option in
+                    Text(option).tag(option)
+                }
+            }
+
+        case "toggle":
+            Toggle(row.name, isOn: Binding(
+                get: { values[row.key ?? row.name] == "true" },
+                set: { values[row.key ?? row.name] = $0 ? "true" : "false" }
+            ))
+
+        case "button":
+            Button(row.name) {
+                save()
+                check()
+            }
+
+        default:
+            EmptyView()
+        }
+    }
+
+    private func binding(for row: LoginRow) -> Binding<String> {
+        let key = row.key ?? row.name
+        return Binding(
+            get: { values[key] ?? "" },
+            set: { values[key] = $0 }
+        )
+    }
+
+    private func save() {
+        for row in rows where row.isInput {
+            let key = row.key ?? row.name
+            guard let value = values[key], !value.isEmpty else { continue }
+            LoginStore.setValue(value, for: source, key: key)
+        }
+        message = "已保存"
+    }
+
+    private func check() {
+        loggedIn = LoginRunner.check(source)
+        message = loggedIn ? "已登录" : "未检测到登录状态（部分源需要先在网页端登录）"
     }
 }

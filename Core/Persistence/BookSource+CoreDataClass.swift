@@ -372,3 +372,146 @@ extension BookSource {
         return items
     }
 }
+
+// MARK: - 登录信息（对齐 Android BaseSource 的 loginInfo）
+
+/// 按书源存放登录信息（UserDefaults 明文，与 Android 一致）
+enum LoginStore {
+
+    private static func storageKey(for source: BookSource) -> String {
+        "loginInfo:" + source.bookSourceUrl
+    }
+
+    /// 该源的全部登录信息
+    static func all(for source: BookSource) -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: storageKey(for: source)) as? [String: String] ?? [:]
+    }
+
+    static func value(for source: BookSource, key name: String) -> String? {
+        let info = all(for: source)
+        guard let value = info[name], !value.isEmpty else { return nil }
+        return value
+    }
+
+    static func setValue(_ value: String, for source: BookSource, key name: String) {
+        var info = all(for: source)
+        info[name] = value
+        UserDefaults.standard.set(info, forKey: storageKey(for: source))
+    }
+
+    /// name 为空时清除该源全部登录信息
+    static func remove(for source: BookSource, key name: String? = nil) {
+        guard let name else {
+            UserDefaults.standard.removeObject(forKey: storageKey(for: source))
+            return
+        }
+        var info = all(for: source)
+        info.removeValue(forKey: name)
+        UserDefaults.standard.set(info, forKey: storageKey(for: source))
+    }
+
+    static func hasLoginInfo(_ source: BookSource) -> Bool {
+        !all(for: source).isEmpty
+    }
+}
+
+extension BookSource {
+
+    /// 登录后追加的请求头：loginInfo 里的 `header` 字段是 JSON 对象字符串
+    /// 对应 Android `BaseSource.getLoginHeaderMap()`
+    var loginHeaderMap: [String: String] {
+        guard let raw = LoginStore.value(for: self, key: "header"),
+              let data = raw.data(using: .utf8),
+              let map = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return map
+    }
+
+    /// 是否声明了登录表单
+    var hasLoginForm: Bool {
+        guard let loginUi, !loginUi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    /// 是否已有登录信息
+    var hasLogin: Bool {
+        LoginStore.hasLoginInfo(self) || !loginHeaderMap.isEmpty
+    }
+}
+
+// MARK: - 登录表单（对齐 Android RowUi / LoginUiV2）
+
+struct LoginRow: Decodable, Identifiable {
+    let name: String
+    let type: String
+    let action: String?
+    let key: String?
+    let hint: String?
+    let options: [String]?
+
+    var id: String { (key ?? name) + "|" + type }
+
+    /// 是否为需要用户输入的控件
+    var isInput: Bool {
+        type == "text" || type == "password" || type == "select" || type == "toggle"
+    }
+}
+
+enum LoginUiParser {
+
+    /// 兼容两种格式：
+    /// - V1：`[{"name":"账号","type":"text","key":"account"}, …]`
+    /// - V2：`{"version":2,"rows":[…]}`
+    static func parse(_ raw: String?) -> [LoginRow] {
+        guard let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let data = raw.data(using: .utf8) else {
+            return []
+        }
+
+        let decoder = JSONDecoder()
+
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let rows = object["rows"],
+           let rowData = try? JSONSerialization.data(withJSONObject: rows) {
+            return (try? decoder.decode([LoginRow].self, from: rowData)) ?? []
+        }
+
+        return (try? decoder.decode([LoginRow].self, from: data)) ?? []
+    }
+}
+
+// MARK: - 登录态校验
+
+enum LoginRunner {
+
+    /// 执行 loginCheckJs（未配置时按「有登录信息即视为已登录」）
+    static func check(_ source: BookSource) -> Bool {
+        guard let script = source.loginCheckJs?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !script.isEmpty else {
+            return source.hasLogin
+        }
+
+        let context = ExecutionContext()
+        context.source = source
+        context.baseURL = URL(string: source.bookSourceUrl)
+
+        let bridge = JSBridge()
+        bridge.context = context
+
+        guard let jsContext = JSContext() else { return source.hasLogin }
+
+        bridge.inject(into: jsContext)
+        jsContext.setObject(source.bookSourceUrl, forKeyedSubscript: "baseUrl" as NSString)
+        jsContext.setObject(source.bookSourceUrl, forKeyedSubscript: "result" as NSString)
+
+        guard let value = jsContext.evaluateScript(script), !value.isUndefined, !value.isNull else {
+            return source.hasLogin
+        }
+
+        let text = (value.toString() ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return text == "true" || text == "1" || text == "yes"
+    }
+}

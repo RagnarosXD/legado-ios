@@ -190,6 +190,14 @@ class AnalyzeUrl {
             }
         }
         
+        // 10.1 合并登录头（对齐 Android getHeaderMap(hasLoginHeader = true)）
+        if let source {
+            let loginHeaders = source.loginHeaderMap
+            for (key, value) in loginHeaders where result.headers[key] == nil {
+                result.headers[key] = value
+            }
+        }
+
         // 11. 添加默认 User-Agent
         if result.headers["User-Agent"] == nil {
             result.headers["User-Agent"] = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1"

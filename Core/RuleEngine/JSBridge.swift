@@ -657,6 +657,62 @@ extension JSBridge {
 
 #endif
 
+        // 登录态（对齐 Android BaseSource / SourceLoginJsExtensions）
+        let getLoginInfoBlock: @convention(block) (String) -> String = { [weak self] key in
+            guard let source = self?.context?.source else { return "" }
+            return LoginStore.value(for: source, key: key) ?? ""
+        }
+        javaObject.setObject(getLoginInfoBlock, forKeyedSubscript: "getLoginInfo" as NSString)
+
+        let putLoginInfoBlock: @convention(block) (String, String) -> Void = { [weak self] key, value in
+            guard let source = self?.context?.source, !key.isEmpty else { return }
+            LoginStore.setValue(value, for: source, key: key)
+            AppLogger.info("Login", "\(source.bookSourceName) 写入登录字段 \(key)")
+        }
+        javaObject.setObject(putLoginInfoBlock, forKeyedSubscript: "putLoginInfo" as NSString)
+
+        let removeLoginInfoBlock: @convention(block) (String) -> Void = { [weak self] key in
+            guard let source = self?.context?.source else { return }
+            LoginStore.remove(for: source, key: key.isEmpty ? nil : key)
+        }
+        javaObject.setObject(removeLoginInfoBlock, forKeyedSubscript: "removeLoginInfo" as NSString)
+
+        let hasLoginBlock: @convention(block) () -> Bool = { [weak self] in
+            guard let source = self?.context?.source else { return false }
+            return source.hasLogin
+        }
+        javaObject.setObject(hasLoginBlock, forKeyedSubscript: "hasLogin" as NSString)
+
+        let hasLoginFormBlock: @convention(block) () -> Bool = { [weak self] in
+            self?.context?.source?.hasLoginForm ?? false
+        }
+        javaObject.setObject(hasLoginFormBlock, forKeyedSubscript: "hasLoginForm" as NSString)
+
+        let getLoginHeaderBlock: @convention(block) () -> String = { [weak self] in
+            guard let source = self?.context?.source else { return "{}" }
+            let map = source.loginHeaderMap
+            guard let data = try? JSONSerialization.data(withJSONObject: map),
+                  let text = String(data: data, encoding: .utf8) else { return "{}" }
+            return text
+        }
+        javaObject.setObject(getLoginHeaderBlock, forKeyedSubscript: "getLoginHeader" as NSString)
+        javaObject.setObject(getLoginHeaderBlock, forKeyedSubscript: "getHeaderMap" as NSString)
+
+        let logoutBlock: @convention(block) () -> Void = { [weak self] in
+            guard let source = self?.context?.source else { return }
+            LoginStore.remove(for: source)
+            AppLogger.info("Login", "\(source.bookSourceName) 已退出登录")
+        }
+        javaObject.setObject(logoutBlock, forKeyedSubscript: "logout" as NSString)
+
+        // 登录动作需要界面交互，规则里调用时只记录，由用户从书源管理进入登录页
+        let loginBlock: @convention(block) () -> Bool = { [weak self] in
+            guard let source = self?.context?.source else { return false }
+            AppLogger.info("Login", "\(source.bookSourceName) 规则请求登录，请从书源管理手动登录")
+            return source.hasLogin
+        }
+        javaObject.setObject(loginBlock, forKeyedSubscript: "login" as NSString)
+
         // JS 包装：getStringList / getElement 复用 __getElements
         _ = context?.jsContext?.evaluateScript(
             """

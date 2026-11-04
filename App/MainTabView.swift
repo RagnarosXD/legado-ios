@@ -985,6 +985,14 @@ struct ExploreListView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("关闭") { dismiss() }
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    Task { await viewModel.addAllToShelf() }
+                } label: {
+                    Label("全部加入书架", systemImage: "books.vertical")
+                }
+                .disabled(viewModel.results.isEmpty)
+            }
         }
         .task {
             await viewModel.load(source: source, ruleUrl: kind.url)
@@ -1188,7 +1196,9 @@ final class ExploreListViewModel: ObservableObject {
     }
 
     /// 加入书架（复用搜索的入库规则：按 bookUrl 去重）
-    func addToShelf(result: SearchBookResult) async {
+    /// - Parameter silent: true 时不弹提示、返回是否「已存在」
+    @discardableResult
+    func addToShelf(result: SearchBookResult, silent: Bool = false) async -> Bool {
         let context = CoreDataStack.shared.viewContext
 
         let request: NSFetchRequest<Book> = Book.fetchRequest()
@@ -1202,13 +1212,17 @@ final class ExploreListViewModel: ObservableObject {
             existing.intro = result.intro
             existing.originName = result.sourceName
             existing.updatedAt = Date()
+            existing.isInShelf = true
             try? CoreDataStack.shared.save()
-            alertMessage = "《\(existing.name)》已在书架"
-            showingAlert = true
-            return
+
+            if !silent {
+                alertMessage = "《\(existing.name)》已在书架"
+                showingAlert = true
+            }
+            return true
         }
 
-        guard let source else { return }
+        guard let source else { return false }
 
         let book = Book.create(in: context)
         book.name = result.name
@@ -1220,9 +1234,29 @@ final class ExploreListViewModel: ObservableObject {
         book.origin = source.sourceId.uuidString
         book.originName = source.bookSourceName
         book.source = source
+        book.isInShelf = true
         try? context.save()
 
-        alertMessage = "已加入书架"
+        if !silent {
+            alertMessage = "已加入书架"
+            showingAlert = true
+        }
+        return false
+    }
+
+    /// 批量加入书架（对齐 Android ExploreShowViewModel 的批量操作）
+    func addAllToShelf() async {
+        guard !results.isEmpty else { return }
+
+        var added = 0
+        var skipped = 0
+
+        for result in results {
+            let existed = await addToShelf(result: result, silent: true)
+            if existed { skipped += 1 } else { added += 1 }
+        }
+
+        alertMessage = "新增 \(added) 本，已存在 \(skipped) 本"
         showingAlert = true
     }
 }

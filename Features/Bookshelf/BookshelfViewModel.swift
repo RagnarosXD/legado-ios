@@ -146,6 +146,8 @@ final class BookshelfViewModel: ObservableObject {
         let context = CoreDataStack.shared.viewContext
 
         let request: NSFetchRequest<Book> = Book.fetchRequest()
+        // 只显示已加入书架的书（搜索结果入库时 isInShelf = false）
+        request.predicate = NSPredicate(format: "isInShelf == YES")
 
         // Android 用位掩码标识分组（一本书可属于多个分组），Core Data 谓词不支持位运算，
         // 选中分组时取全量后内存过滤再切片
@@ -319,6 +321,31 @@ final class BookshelfViewModel: ObservableObject {
         try? CoreDataStack.shared.save()
         Task { await loadBooks() }
         AppLogger.info("Bookshelf", "批量加入分组 \(ids.count) 本 → \(groupId)")
+    }
+
+    /// 批量移出分组（Android remove_from_group：位掩码 AND NOT）
+    func removeBooks(ids: Set<UUID>, fromGroup groupId: Int64) {
+        guard !ids.isEmpty else { return }
+        let context = CoreDataStack.shared.viewContext
+
+        for book in books where ids.contains(book.bookId) {
+            book.group = book.group & ~groupId
+        }
+        try? CoreDataStack.shared.save()
+        Task { await loadBooks() }
+        AppLogger.info("Bookshelf", "批量移出分组 \(ids.count) 本 ← \(groupId)")
+    }
+
+    /// 批量移出书架（保留书籍记录与阅读进度，只是不再显示在书架）
+    func setBooksOffShelf(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+
+        for book in books where ids.contains(book.bookId) {
+            book.isInShelf = false
+        }
+        try? CoreDataStack.shared.save()
+        books.removeAll { ids.contains($0.bookId) }
+        AppLogger.info("Bookshelf", "批量移出书架 \(ids.count) 本")
     }
 
     func removeBook(_ book: Book) {

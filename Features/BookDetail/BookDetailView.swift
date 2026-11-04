@@ -427,7 +427,7 @@ class BookDetailViewModel: ObservableObject {
     init(book: Book) {
         self.book = book
         self.currentSource = book.source
-        self.isFavorite = Self.tags(from: book.customTag).contains(Self.favoriteTag)
+        self.isFavorite = book.isInShelf
     }
     
     func loadChapters() async {
@@ -478,24 +478,26 @@ class BookDetailViewModel: ObservableObject {
         }
     }
     
+    /// 加入 / 移出书架（对齐 Android BookInfoActivity 的 inBookshelf 切换）
     func toggleFavorite() {
-        var tags = Self.tags(from: book.customTag)
-        if tags.contains(Self.favoriteTag) {
-            tags.remove(Self.favoriteTag)
-        } else {
-            tags.insert(Self.favoriteTag)
+        let target = !book.isInShelf
+        book.isInShelf = target
+
+        // 加入时归到默认分组（位掩码第 1 位），移出时清掉
+        if target {
+            book.group = book.group == 0 ? 1 : book.group
         }
 
-        book.customTag = Self.encodeTags(tags)
-        isFavorite = tags.contains(Self.favoriteTag)
+        isFavorite = target
 
         do {
             try CoreDataStack.shared.save()
+            AppLogger.info("BookDetail", "\(book.name) \(target ? "加入" : "移出")书架")
         } catch {
             context.rollback()
-            isFavorite = Self.tags(from: book.customTag).contains(Self.favoriteTag)
+            isFavorite = book.isInShelf
             showingAlert = true
-            alertMessage = "收藏状态保存失败：\(error.localizedDescription)"
+            alertMessage = "书架状态保存失败：\(error.localizedDescription)"
         }
     }
     

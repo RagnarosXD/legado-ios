@@ -268,6 +268,8 @@ class SearchViewModel: ObservableObject {
         }
 
         let book = Book.create(in: context)
+        // 对齐 Android：从搜索结果进详情页时还不算「在书架」，需在详情页点「加入书架」
+        book.isInShelf = false
         book.name = result.name
         book.author = result.author
         book.coverUrl = result.coverUrl

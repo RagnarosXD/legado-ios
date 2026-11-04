@@ -933,6 +933,12 @@ struct ChapterListView: View {
     
     /// 倒序显示（对齐 Android TocActivity 的「反转目录」）
     @State private var isReversed = false
+    /// 章节搜索（对齐 Android 目录搜索过滤）
+    @State private var searchText = ""
+    /// 折叠的分卷
+    @State private var collapsedVolumes: Set<UUID> = []
+    /// 是否显示章节字数（对齐 Android tocCountWords）
+    @State private var showWordCount = false
 
     private var orderedChapters: [(index: Int, chapter: BookChapter)] {
         let list = Array(viewModel.chapters.enumerated())
@@ -940,24 +946,70 @@ struct ChapterListView: View {
         return isReversed ? list.reversed() : list
     }
 
+    /// 搜索过滤后的章节
+    private var visibleChapters: [(index: Int, chapter: BookChapter)] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return applyVolumeCollapse(orderedChapters) }
+
+        // 搜索时不做卷折叠，避免命中项被折叠掉
+        return orderedChapters.filter {
+            $0.chapter.title.localizedCaseInsensitiveContains(keyword)
+        }
+    }
+
+    /// 卷折叠：卷头始终显示，其下章节在折叠时隐藏
+    private func applyVolumeCollapse(
+        _ chapters: [(index: Int, chapter: BookChapter)]
+    ) -> [(index: Int, chapter: BookChapter)] {
+        guard !collapsedVolumes.isEmpty else { return chapters }
+
+        var result: [(index: Int, chapter: BookChapter)] = []
+        var collapsed = false
+
+        for item in chapters {
+            if item.chapter.isVolume {
+                collapsed = collapsedVolumes.contains(item.chapter.chapterId)
+                result.append(item)
+            } else if !collapsed {
+                result.append(item)
+            }
+        }
+        return result
+    }
+
     var body: some View {
         NavigationView {
             ScrollViewReader { proxy in
                 List {
-                    ForEach(orderedChapters, id: \.chapter.chapterId) { item in
+                    ForEach(visibleChapters, id: \.chapter.chapterId) { item in
                         if item.chapter.isVolume {
-                            // 分卷标题行（对齐 Android 的卷头，不可点击跳转）
-                            HStack {
-                                Image(systemName: "book.closed")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                            // 分卷标题行（可折叠，对齐 Android 的卷展开/收起）
+                            Button {
+                                if collapsedVolumes.contains(item.chapter.chapterId) {
+                                    collapsedVolumes.remove(item.chapter.chapterId)
+                                } else {
+                                    collapsedVolumes.insert(item.chapter.chapterId)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: collapsedVolumes.contains(item.chapter.chapterId)
+                                          ? "chevron.right" : "chevron.down")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
 
-                                Text(item.chapter.title)
-                                    .font(.subheadline.weight(.semibold))
+                                    Image(systemName: "book.closed")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
 
-                                Spacer()
+                                    Text(item.chapter.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.primary)
+
+                                    Spacer()
+                                }
+                                .padding(.vertical, 2)
                             }
-                            .padding(.vertical, 2)
+                            .buttonStyle(.plain)
                             .id(item.chapter.chapterId)
                         } else {
                             Button(action: {
@@ -977,6 +1029,19 @@ struct ChapterListView: View {
 
                                     Spacer()
 
+                                    if showWordCount, item.chapter.wordCount > 0 {
+                                        Text("\(item.chapter.wordCount)")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .monospacedDigit()
+                                    }
+
+                                    if item.chapter.isVIP {
+                                        Image(systemName: "lock.fill")
+                                            .font(.caption2)
+                                            .foregroundColor(.orange)
+                                    }
+
                                     if item.chapter.isCached {
                                         Image(systemName: "arrow.down.circle.fill")
                                             .foregroundColor(.green)
@@ -988,6 +1053,7 @@ struct ChapterListView: View {
                         }
                     }
                 }
+                .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索章节")
                 .onAppear {
                     // 打开目录自动定位到当前章
                     if viewModel.currentChapterIndex >= 0,
@@ -1006,6 +1072,16 @@ struct ChapterListView: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Toggle("显示字数", isOn: $showWordCount)
+                        Button(isReversed ? "切换为正序" : "切换为倒序") {
+                            isReversed.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
                         dismiss()
                     }

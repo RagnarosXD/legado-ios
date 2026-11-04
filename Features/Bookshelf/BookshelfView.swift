@@ -17,10 +17,14 @@ struct BookshelfView: View {
     @State private var showingSearch = false
     /// 长按菜单里选中的待换源书籍
     @State private var changeSourceBook: Book?
+    /// 书架长按 → 书籍详情（对齐 Android 长按进 BookInfoActivity）
+    @State private var detailBook: Book?
     /// 批量管理（对齐 Android BookshelfManageActivity）
     @State private var isSelecting = false
     @State private var selectedBookIds: Set<UUID> = []
     @State private var showingGroupPicker = false
+    /// 分组操作类型：加入 / 移出
+    @State private var groupActionIsAdd = true
     /// 网格列数（对齐 Android bookshelfLayout：≥2 为网格列数）
     @AppStorage("bookshelfColumns") private var columns: Int = 3
     /// 是否显示书名（对齐 Android showBookname）
@@ -51,13 +55,31 @@ struct BookshelfView: View {
                 batchBar
             }
         }
+        .sheet(isPresented: Binding(
+            get: { detailBook != nil },
+            set: { if !$0 { detailBook = nil } }
+        )) {
+            if let detailBook {
+                NavigationStack {
+                    BookDetailView(book: detailBook)
+                }
+            }
+        }
         .sheet(isPresented: $showingGroupManage) {
             GroupManageView(viewModel: viewModel)
         }
-        .confirmationDialog("加入分组", isPresented: $showingGroupPicker, titleVisibility: .visible) {
+        .confirmationDialog(
+            groupActionIsAdd ? "加入分组" : "移出分组",
+            isPresented: $showingGroupPicker,
+            titleVisibility: .visible
+        ) {
             ForEach(viewModel.groups, id: \.groupId) { group in
                 Button(group.groupName) {
-                    viewModel.addBooks(ids: selectedBookIds, toGroup: group.groupId)
+                    if groupActionIsAdd {
+                        viewModel.addBooks(ids: selectedBookIds, toGroup: group.groupId)
+                    } else {
+                        viewModel.removeBooks(ids: selectedBookIds, fromGroup: group.groupId)
+                    }
                 }
             }
             Button("取消", role: .cancel) { }
@@ -272,10 +294,32 @@ ToolbarItem(placement: .navigationBarTrailing) {
             }
             .font(.subheadline)
 
-            Button("加入分组") {
-                showingGroupPicker = true
+            Menu {
+                Button {
+                    groupActionIsAdd = true
+                    showingGroupPicker = true
+                } label: {
+                    Label("加入分组", systemImage: "folder.badge.plus")
+                }
+
+                Button {
+                    groupActionIsAdd = false
+                    showingGroupPicker = true
+                } label: {
+                    Label("移出分组", systemImage: "folder.badge.minus")
+                }
+
+                Button {
+                    viewModel.setBooksOffShelf(ids: selectedBookIds)
+                    selectedBookIds.removeAll()
+                    isSelecting = false
+                } label: {
+                    Label("移出书架", systemImage: "books.vertical")
+                }
+            } label: {
+                Text("分组/书架")
+                    .font(.subheadline)
             }
-            .font(.subheadline)
             .disabled(selectedBookIds.isEmpty)
 
             Spacer()
@@ -342,6 +386,12 @@ ToolbarItem(placement: .navigationBarTrailing) {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button {
+                                detailBook = book
+                            } label: {
+                                Label("书籍详情", systemImage: "info.circle")
+                            }
+
+                            Button {
                                 changeSourceBook = book
                             } label: {
                                 Label("换源", systemImage: "arrow.triangle.2.circlepath")
@@ -399,6 +449,12 @@ ToolbarItem(placement: .navigationBarTrailing) {
                         BookListItemView(book: book)
                     }
                     .contextMenu {
+                        Button {
+                            detailBook = book
+                        } label: {
+                            Label("书籍详情", systemImage: "info.circle")
+                        }
+
                         Button {
                             changeSourceBook = book
                         } label: {

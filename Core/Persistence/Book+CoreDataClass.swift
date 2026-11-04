@@ -12,6 +12,8 @@ import CoreData
 public class Book: NSManagedObject {
     // MARK: - 基本信息
     @NSManaged public var bookId: UUID
+    /// 是否在书架（对齐 Android：搜索/发现得到的书要「加入书架」才进书架）
+    @NSManaged public var isInShelf: Bool
     @NSManaged public var name: String
     @NSManaged public var author: String
     @NSManaged public var kind: String?

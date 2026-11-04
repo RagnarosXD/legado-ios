@@ -211,3 +211,20 @@
 | P2 | POST 表单已编码仍二次编码 | 检测 body 含 `%` 且含 `=` 时跳过 `encodeFormBody` | 手工编码的 body 不再被二次转义 |
 
 **仍未修（后续按失败源补）**：`java.webView` 之外的可视浏览器交互（`startBrowser`/`showBrowser`）、文件下载与解压（`downloadFile`/`cacheFile`/`unzipFile`）、字体反混淆（`queryTTF`/`replaceFont`）、RSA 签名（`createSign`/`createAsymmetricCrypto`）、`ajaxTestAll`、`@ownText` 的空白归一细节。
+---
+
+## 十二、P3 修复记录（1.3.42）
+
+| # | 审计项 | 修复内容 |
+| --- | --- | --- |
+| P0-1 | 书架长按无法进详情 | 网格与列表的长按菜单新增「书籍详情」，sheet 打开 `BookDetailView` |
+| P0-2 | 「加入书架」是假状态（只改 customTag） | `Book` 新增 `isInShelf`（Core Data 默认 YES，旧数据自动在架）；书架查询加 `isInShelf == YES`；详情页按钮改为真实切换（加入时归到默认分组，移出保留进度）；搜索结果入库时 `isInShelf = false`（对齐 Android：搜索进详情不算在架） |
+| P1-7 | 目录缺搜索/字数/VIP/分卷折叠 | 目录加 `.searchable` 章节搜索、右上菜单可开关「显示字数」、章节行显示 VIP 锁、卷头可点击折叠/展开（搜索时自动忽略折叠） |
+| P1-8 | 批量能力缺口 | 新增「移出分组」（位掩码 AND NOT）与「移出书架」（保留记录与进度），批量栏分组操作改为菜单 |
+| P1-14 | 发现页无批量加书架 | 内容页右上「全部加入书架」，逐条去重并汇总「新增 N / 已存在 M」 |
+
+### 修复后的行为变化（需真机确认）
+
+1. **首次启动会做一次 Core Data 轻量迁移**（新增 `isInShelf`），旧书架的书默认在架，不会丢
+2. **搜索/发现点进详情不再自动进书架**，需要在详情页点「加入书架」
+3. 书架上长按 → 「书籍详情」可直接看简介/目录/书源信息

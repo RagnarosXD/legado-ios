@@ -688,9 +688,25 @@ struct SourceSubscriptionView: View {
                         await manager.updateAllSubscriptions()
                     }
                 }
+                .disabled(manager.isUpdating)
 
                 if manager.isUpdating {
-                    ProgressView(value: manager.updateProgress)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: manager.updateProgress)
+
+                        HStack {
+                            Text(manager.updateStage ?? "处理中…")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            Spacer()
+
+                            Text("\(Int(manager.updateProgress * 100))%")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
                 }
 
                 if let err = manager.lastUpdateError {

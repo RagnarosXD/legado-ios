@@ -228,3 +228,43 @@
 1. **首次启动会做一次 Core Data 轻量迁移**（新增 `isInShelf`），旧书架的书默认在架，不会丢
 2. **搜索/发现点进详情不再自动进书架**，需要在详情页点「加入书架」
 3. 书架上长按 → 「书籍详情」可直接看简介/目录/书源信息
+---
+
+## 十三、订阅更新失败修复（1.3.43）
+
+用户反馈：点「更新全部」后进度条恒为 0，十几秒后自动恢复到未点击状态，导出日志无任何错误。
+
+### 根因
+
+| # | 问题 | 证据 |
+| --- | --- | --- |
+| 1 | 请求过程**完全没有日志** | `fetchSources` 用裸 `URLSession.shared.data(for:)`，成功/失败都不记录，日志自然空白 |
+| 2 | 错误被两处吞掉 | `catch { print(...) }`（不进 AppLogger 文件）+ 单订阅入口 `try? await` |
+| 3 | 进度按「订阅数」算，不是源数 | `total` = 订阅条数；1 个订阅时导入 800 个源全程 `updateProgress = 0` |
+| 4 | 导入是 O(n²) | 每个源一次 `BookSource.fetchRequest()` 全表查询（本地 800 × 订阅 800 = 64 万次比较） |
+| 5 | 一次性 `save()` 几百个变更 | 中途无进度、无让出主线程 |
+| 6 | 更新覆盖本地启停状态 | `enabled = source.enabled ?? true`，手动停用的源会被重新启用 |
+| 7 | 字段覆盖不全 | `jsLib` / `loginUi` / `variableComment` 等未写入 |
+
+### 修复
+
+| # | 修复 |
+| --- | --- |
+| 1 | `fetchSources` 全链路日志：请求 URL、响应 status/bytes/host、失败 NSError code、解析成功数、**解析失败时打印响应前 240 字节** |
+| 2 | 所有错误写入 `AppLogger.error` + `lastUpdateError`，订阅页红字显示 |
+| 3 | 进度改为「订阅 × 阶段」折算：下载 0~15%、解析 15~30%、导入 30~100%，并显示「导入 320/800」与百分比 |
+| 4 | 导入前一次性预取所有 `bookSourceUrl` 建字典，O(n²) → O(n) |
+| 5 | 每 50 个源 `save()` + `await Task.yield()`，进度条可刷新、界面不卡 |
+| 6 | 更新已有源时 `preserveLocalState: true`，保留本地 `enabled` / `enabledExplore` / `respondTime` |
+| 7 | 补全 `loginUi` / `loginCheckJs` / `jsLib` / `coverDecodeJs` / `variableComment` / `bookSourceComment` / `enabledCookieJar` / `customOrder` / `ruleReviewData` |
+| 8 | 订阅 URL 只接受 http/https，其它形式（如 `legado://`）明确报「订阅地址不合法」而不是静默失败 |
+| 9 | 请求加浏览器 UA（部分 CDN 会拦默认客户端） |
+
+### 如果修复后仍失败
+
+日志里现在会有明确线索，按关键字搜 `[Subscription]`：
+
+- `请求失败 host=... code=-1009` → 网络不可达（该域名在你当前网络下不通）
+- `响应 status=403` → 站点拒绝（可能需要 Cookie/Referer）
+- `解析失败，响应片段：<html>...` → 返回的不是书源 JSON
+- `订阅地址不合法` → 订阅 URL 不是 http/https

@@ -212,14 +212,14 @@ class SourceSubscriptionManager: ObservableObject {
         _ subscription: SourceSubscription,
         progress: ((String, Double) -> Void)? = nil
     ) async throws {
-        progress("下载 \(subscription.name)", 0.05)
+        progress?("下载 \(subscription.name)", 0.05)
 
         let sources = try await fetchSources(from: subscription.url)
-        progress("解析到 \(sources.count) 个书源", 0.3)
+        progress?("解析到 \(sources.count) 个书源", 0.3)
 
         try await importSources(sources) { done, total in
             let ratio = Double(done) / Double(max(1, total))
-            progress("导入 \(done)/\(total)", 0.3 + 0.7 * ratio)
+            progress?("导入 \(done)/\(total)", 0.3 + 0.7 * ratio)
         }
 
         // 更新订阅的最后更新时间

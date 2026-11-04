@@ -448,10 +448,14 @@ class RuleEngine {
     ///   - body: HTML 或 JSON 字符串
     ///   - baseUrl: 基础 URL
     /// - Returns: 元素上下文数组
-    func getElements(ruleStr: String?, body: String, baseUrl: String?) throws -> [ElementContext] {
-        guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    func getElements(ruleStr rawRule: String?, body: String, baseUrl: String?) throws -> [ElementContext] {
+        guard let rawRule, !rawRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return []
         }
+
+        // 对齐 Android AnalyzeRule.makeUpRule：列表规则同样先替换 {{...}} / $n
+        let ruleStr = TemplateEngine.render(rawRule, context: ExecutionContext()).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ruleStr.isEmpty else { return [] }
 
         let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let isJson = trimmedBody.hasPrefix("{") || trimmedBody.hasPrefix("[")
@@ -719,13 +723,27 @@ class RuleEngine {
     }
 
     /// 原取值实现（不含 isUrl 处理）
-    private func getStringRaw(ruleStr: String?,
+    private func getStringRaw(ruleStr rawRule: String?,
                    elementContext: ElementContext,
                    baseUrl: String? = nil,
                    joinAll: Bool = false) -> String {
-        guard let ruleStr, !ruleStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let rawRule, !rawRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
         }
+
+        // 对齐 Android AnalyzeRule.makeUpRule：字段规则在取值前先替换
+        // {{...}}（JS 表达式 / 变量）、$n（结果列表下标）、@get:key
+        let renderContext = ExecutionContext()
+        renderContext.source = elementContext.source
+        renderContext.variables = elementContext.variables
+        if let initial = elementContext.initialResult {
+            renderContext.lastResult = .string(initial)
+        }
+
+        let ruleStr = TemplateEngine.render(rawRule, context: renderContext)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !ruleStr.isEmpty else { return "" }
 
         // XPath 命中节点：优先在该节点范围内执行 CSS 子规则，
         // 避免把节点 HTML 重新 parse（表格/嵌套结构会变形）
@@ -902,13 +920,13 @@ class RuleEngine {
     
     /// 获取字符串列表（用于目录列表等）
     func getStringList(
-        ruleStr: String?,
+        ruleStr rawRule: String?,
         body: String,
         baseUrl: String?,
         isUrl: Bool = false
     ) throws -> [String] {
-        guard let ruleStr = ruleStr, !ruleStr.isEmpty else { return [] }
-        
+        guard let rawRule, !rawRule.isEmpty else { return [] }
+
         let context = ExecutionContext()
         let isJson = body.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") ||
                      body.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[")
@@ -924,6 +942,11 @@ class RuleEngine {
             }
         }
         context.baseURL = baseUrl.flatMap { URL(string: $0) }
+
+        // 对齐 Android AnalyzeRule.makeUpRule
+        let ruleStr = TemplateEngine.render(rawRule, context: context)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ruleStr.isEmpty else { return [] }
 
         let result = try executeSingle(rule: ruleStr, context: context)
 

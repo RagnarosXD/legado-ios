@@ -146,11 +146,35 @@ class JSBridge {
         }
 
         javaObject?.setObject(ajaxBlock, forKeyedSubscript: "ajax" as NSString)
-        // Android JsExtensions.connect()：语义与 ajax 相同（返回响应体字符串）
-        javaObject?.setObject(ajaxBlock, forKeyedSubscript: "connect" as NSString)
         javaObject?.setObject(getStringAsyncBlock, forKeyedSubscript: "getStringAsync" as NSString)
         javaObject?.setObject(putBlock, forKeyedSubscript: "put" as NSString)
-        javaObject?.setObject(getBlock, forKeyedSubscript: "get" as NSString)
+
+        // 变量读写（Android BaseSource 的 getVariable / putVariable）
+        javaObject?.setObject(getBlock, forKeyedSubscript: "__getVariable" as NSString)
+        javaObject?.setObject(putBlock, forKeyedSubscript: "__putVariable" as NSString)
+
+        // connect / get / post 返回 { code, body, url, headers } 的 JSON，
+        // 由 JS 包装层转成对象（对齐 Android 的 StrResponse，脚本可直接读 resp.body / resp.code）
+        let connectJsonBlock: @convention(block) (String, String) -> String = { url, headers in
+            guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            return JSBridge.httpResponseJSON(url: url, method: "GET", body: nil, headers: merged)
+        }
+        javaObject?.setObject(connectJsonBlock, forKeyedSubscript: "__connectJson" as NSString)
+
+        let getJsonBlock: @convention(block) (String, String) -> String = { url, headers in
+            guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            return JSBridge.httpResponseJSON(url: url, method: "GET", body: nil, headers: merged)
+        }
+        javaObject?.setObject(getJsonBlock, forKeyedSubscript: "__getJson" as NSString)
+
+        let postJsonBlock: @convention(block) (String, String, String) -> String = { url, body, headers in
+            guard !url.isEmpty else { return "{\"code\":-1,\"body\":\"\"}" }
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            return JSBridge.httpResponseJSON(url: url, method: "POST", body: body, headers: merged)
+        }
+        javaObject?.setObject(postJsonBlock, forKeyedSubscript: "__postJson" as NSString)
         javaObject?.setObject(logBlock, forKeyedSubscript: "log" as NSString)
         javaObject?.setObject(base64EncodeBlock, forKeyedSubscript: "base64Encode" as NSString)
         javaObject?.setObject(base64DecodeBlock, forKeyedSubscript: "base64Decode" as NSString)
@@ -185,11 +209,36 @@ class JSBridge {
                     var raw = java.__getElements(s(rule));
                     try { return JSON.parse(raw); } catch (e) { return []; }
                 };
-                java.post = function (url, body, headers) {
-                    var payload = '';
-                    if (headers) { payload = typeof headers === 'string' ? headers : JSON.stringify(headers); }
-                    return java.__post(s(url), s(body), payload);
+                function headerPayload(headers) {
+                    if (!headers) { return ''; }
+                    return typeof headers === 'string' ? headers : JSON.stringify(headers);
+                }
+                function toResponse(raw) {
+                    try { return JSON.parse(raw); } catch (e) { return { code: -1, body: s(raw), headers: {}, url: '' }; }
+                }
+                java.connect = function (url, headers) {
+                    return toResponse(java.__connectJson(s(url), headerPayload(headers)));
                 };
+                java.get = function (url, headers) {
+                    return toResponse(java.__getJson(s(url), headerPayload(headers)));
+                };
+                java.post = function (url, body, headers) {
+                    return toResponse(java.__postJson(s(url), s(body), headerPayload(headers)));
+                };
+                java.head = function (url, headers) {
+                    return toResponse(java.__head(s(url), headerPayload(headers)));
+                };
+                java.base64DecodeToByteArray = function (text) {
+                    try { return JSON.parse(java.__base64ToBytes(s(text))); } catch (e) { return []; }
+                };
+                java.hexDecodeToByteArray = function (text) {
+                    try { return JSON.parse(java.__hexToBytes(s(text))); } catch (e) { return []; }
+                };
+                java.getSource = function () {
+                    try { return JSON.parse(java.__getSource()); } catch (e) { return {}; }
+                };
+                java.getVariable = function (key) { return java.__getVariable(s(key)); };
+                java.putVariable = function (key, value) { java.__putVariable(s(key), s(value)); };
                 java.ajaxAll = function (urls) {
                     var raw = java.__ajaxAll(JSON.stringify(urls || []));
                     try { return JSON.parse(raw); } catch (e) { return []; }
@@ -199,6 +248,69 @@ class JSBridge {
             })();
             """
         )
+    }
+
+    /// 同步 HTTP 请求，返回 { code, body, url, headers } 的 JSON 字符串
+    /// 对齐 Android `StrResponse`（脚本可读 resp.code / resp.body / resp.headers）
+    static func httpResponseJSON(
+        url: String,
+        method: String,
+        body: String?,
+        headers: [String: String]
+    ) -> String {
+        guard let requestUrl = URL(string: url) else {
+            return "{\"code\":-1,\"body\":\"\"}"
+        }
+
+        var request = URLRequest(url: requestUrl)
+        request.httpMethod = method
+        request.timeoutInterval = 15
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        if let body, !body.isEmpty {
+            request.httpBody = body.data(using: .utf8)
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var statusCode = -1
+        var payload = ""
+        var responseHeaders: [String: String] = [:]
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let http = response as? HTTPURLResponse {
+                statusCode = http.statusCode
+                for (key, value) in http.allHeaderFields {
+                    if let name = key as? String, let text = value as? String {
+                        responseHeaders[name] = text
+                    }
+                }
+            }
+            if let data {
+                payload = String(data: data, encoding: .utf8) ?? ""
+            }
+            if let error {
+                AppLogger.warn("JSBridge", "同步请求失败 \(method) \(url.prefix(100))：\(error.localizedDescription)")
+            }
+            semaphore.signal()
+        }.resume()
+
+        if semaphore.wait(timeout: .now() + 20) == .timedOut {
+            AppLogger.warn("JSBridge", "同步请求超时 \(method) \(url.prefix(100))")
+        }
+
+        let object: [String: Any] = [
+            "code": statusCode,
+            "body": payload,
+            "url": url,
+            "headers": responseHeaders
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{\"code\":-1,\"body\":\"\"}"
+        }
+        return text
     }
 
     /// 解析 header 参数（JSON 字符串 → 字典）
@@ -712,6 +824,67 @@ extension JSBridge {
             return source.hasLogin
         }
         javaObject.setObject(loginBlock, forKeyedSubscript: "login" as NSString)
+
+        // java.head(url, headers)：HEAD 请求（对齐 JsExtensions.head）
+        let headBlock: @convention(block) (String, String) -> String = { url, headers in
+            guard !url.isEmpty else { return "{\"code\":-1}" }
+            let merged = self.parseHeaders(headers) ?? self.parseSourceHeaders()
+            return JSBridge.httpResponseJSON(url: url, method: "HEAD", body: nil, headers: merged)
+        }
+        javaObject.setObject(headBlock, forKeyedSubscript: "__head" as NSString)
+
+        // java.t2s / s2t：繁简转换（ICU Transform）
+        let t2sBlock: @convention(block) (String) -> String = { text in
+            text.applyingTransform(StringTransform("Traditional-Simplified"), reverse: false) ?? text
+        }
+        javaObject.setObject(t2sBlock, forKeyedSubscript: "t2s" as NSString)
+
+        let s2tBlock: @convention(block) (String) -> String = { text in
+            text.applyingTransform(StringTransform("Traditional-Simplified"), reverse: true) ?? text
+        }
+        javaObject.setObject(s2tBlock, forKeyedSubscript: "s2t" as NSString)
+
+        // 字节数组解码：返回 JSON 数组字符串，由 JS 包装层 JSON.parse
+        let base64ToBytesBlock: @convention(block) (String) -> String = { text in
+            guard let data = Data(base64Encoded: text, options: .ignoreUnknownCharacters) else { return "[]" }
+            let array = data.map { Int($0) }
+            guard let encoded = try? JSONSerialization.data(withJSONObject: array),
+                  let json = String(data: encoded, encoding: .utf8) else { return "[]" }
+            return json
+        }
+        javaObject.setObject(base64ToBytesBlock, forKeyedSubscript: "__base64ToBytes" as NSString)
+
+        let hexToBytesBlock: @convention(block) (String) -> String = { text in
+            let cleaned = text.filter { $0.isHexDigit }
+            var bytes: [Int] = []
+            var index = cleaned.startIndex
+            while index < cleaned.endIndex,
+                  let next = cleaned.index(index, offsetBy: 2, limitedBy: cleaned.endIndex) {
+                if let value = UInt8(cleaned[index..<next], radix: 16) {
+                    bytes.append(Int(value))
+                }
+                index = next
+            }
+            guard let encoded = try? JSONSerialization.data(withJSONObject: bytes),
+                  let json = String(data: encoded, encoding: .utf8) else { return "[]" }
+            return json
+        }
+        javaObject.setObject(hexToBytesBlock, forKeyedSubscript: "__hexToBytes" as NSString)
+
+        // java.getSource()：当前书源的关键信息（对齐 AnalyzeRule.getSource）
+        let getSourceBlock: @convention(block) () -> String = { [weak self] in
+            guard let source = self?.context?.source else { return "{}" }
+            let object: [String: Any] = [
+                "bookSourceUrl": source.bookSourceUrl,
+                "bookSourceName": source.bookSourceName,
+                "bookSourceGroup": source.bookSourceGroup ?? "",
+                "bookSourceType": Int(source.bookSourceType)
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: object),
+                  let json = String(data: data, encoding: .utf8) else { return "{}" }
+            return json
+        }
+        javaObject.setObject(getSourceBlock, forKeyedSubscript: "__getSource" as NSString)
 
         // JS 包装：getStringList / getElement 复用 __getElements
         _ = context?.jsContext?.evaluateScript(

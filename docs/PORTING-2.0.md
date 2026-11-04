@@ -300,3 +300,21 @@ Android 的 `java.webView` 是**同步阻塞**的（`runBlocking`），iOS 侧�
 ### P1 完成度：约 96%
 
 仍缺：登录态（`login` / `getLoginInfo` / `getHeaderMap` / `loginUi` 动态表单）、`getString(isUrl:)` 统一入口（行为已等价，仅入口不统一）、XPath 子规则节点复用（CSS 子规则仍字符串二次解析）、低频 `java.*`（解压 / 字体反混淆 / RSA / 并发控制）。
+## 十七、P1 登录态（1.3.35）
+
+按用户决定：登录信息以 **UserDefaults 明文**按书源存放，Cookie **不做按源隔离**（沿用全局 `HTTPCookieStorage`）。
+
+| 能力 | Android 依据 | iOS 实现 |
+| --- | --- | --- |
+| 登录信息存储 | `BaseSource.getLoginInfo/putLoginInfo/removeLoginInfo` | `LoginStore`：key 为 `loginInfo:<bookSourceUrl>`，值为 JSON 字典 |
+| 登录头合并 | `BaseSource.getHeaderMap(hasLoginHeader = true)` | `AnalyzeUrl` 在书源 header 之后合并 `source.loginHeaderMap`（`loginInfo.header` 的 JSON） |
+| JS 方法 | `SourceLoginJsExtensions.kt` | `getLoginInfo` / `putLoginInfo` / `removeLoginInfo` / `hasLogin` / `hasLoginForm` / `getLoginHeader` / `getHeaderMap` / `login` / `logout` |
+| 登录表单 | `LoginUiV2.kt` + `RowUi` + `SourceLoginDialog` | `LoginRow` + `LoginUiParser`（兼容 V1 数组与 V2 `{"version":2,"rows":[…]}`），`SourceLoginSheet` 渲染 text/password/label/select/toggle/button |
+| 登录校验 | `loginCheckJs` | `LoginRunner.check`：在注入 `java` 的 JSContext 中执行，返回 true/1/yes 视为已登录；未配置时按「有登录信息即已登录」 |
+| 状态显示 | — | 书源行长按可进登录页；钥匙图标绿（已登录）/紫（需登录未登录） |
+
+### 已知限制
+
+- `java.login()` 在规则里调用时**不能弹出界面**（JSContext 同步执行），只记录日志并返回当前登录状态；登录需从书源管理手动进入
+- 依赖「网页端登录后拿 Cookie」的源无法在 App 内完成（iOS 与 Safari 不共享 Cookie，且当前没有可见 WebView 登录页）
+- 表单按钮的 `action` 暂未执行（只保存输入并跑 `loginCheckJs`）

@@ -563,9 +563,10 @@ struct SourceItemView: View {
 
                     // 能力标记：需登录 / 有发现
                     if source.requiresLogin {
-                        Image(systemName: "person.badge.key")
+                        // 已登录显示实心绿钥匙，未登录为空心紫钥匙
+                        Image(systemName: source.hasLogin ? "person.badge.key.fill" : "person.badge.key")
                             .font(.caption)
-                            .foregroundColor(.purple)
+                            .foregroundColor(source.hasLogin ? .green : .purple)
                     }
                     if source.hasExplore {
                         Image(systemName: "safari")
